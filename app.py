@@ -6,7 +6,7 @@ from PIL import Image, ImageOps
 import pytesseract
 import io
 import numpy as np
-import cv2
+import cv2  # 이 부분을 위해 requirements.txt 설정이 필요합니다
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
@@ -36,25 +36,20 @@ if uploaded_files:
         file_key = uploaded_file.name
         
         if file_key not in st.session_state.ocr_cache:
-            # [한국어 강화 전처리] OpenCV 활용
+            # [한국어 강화 전처리 로직]
             img = Image.open(uploaded_file)
             img_array = np.array(img.convert('RGB'))
             gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-            
-            # 가우시안 블러로 미세 노이즈 제거
             blur = cv2.GaussianBlur(gray, (3,3), 0)
-            
-            # 적응형 이진화: 한국어 획을 더 또렷하게 만듦 
             thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
             
-            # OCR 엔진 설정 (한국어+영어 병행)
             custom_config = r'--oem 3 --psm 6 -l kor+eng'
             st.session_state.ocr_cache[file_key] = pytesseract.image_to_string(thresh, config=custom_config)
         
         raw_text = st.session_state.ocr_cache[file_key]
         clean_text = raw_text.replace(' ', '')
 
-        # 데이터 추출 (달러 여부, 날짜, 식사구분, 금액)
+        # 데이터 추출
         is_dollar = not bool(re.search(r'[ㄱ-ㅎㅏ-ㅣ가-힣]', raw_text))
         date_match = re.search(r'(\d{4})[-/.](\d{2})[-/.](\d{2})', raw_text)
         try:
@@ -63,8 +58,6 @@ if uploaded_files:
         
         price_match = re.search(r'(?:TOTAL|AMOUNT|합계|결제|금액)[:]?\s*([\d,.]+)', clean_text, re.I)
         extracted_price = int(price_match.group(1).replace(',', '').split('.')[0]) if price_match else 0
-        
-        # 식당명 추출 로직 강화 (의미 없는 짧은 줄 제외)
         lines = [l.strip() for l in raw_text.split('\n') if len(l.strip()) > 1]
         extracted_store = lines[0] if lines else "식당 직접 입력"
 
@@ -84,19 +77,18 @@ if uploaded_files:
                     "날짜": d_val.strftime('%y-%m-%d'), "식당명": s_val, "구분": m_val, 
                     "금액": pr_val, "비고": r_val, "img": Image.open(uploaded_file)
                 }
-                # 매뉴얼에서 확인한 고급 아이콘 적용
+                # 매뉴얼 아이콘 적용
                 st.success(f"**{s_val}** 반영 완료!", icon=":material/task_alt:")
 
     if st.session_state.data_dict:
         sorted_list = sorted(st.session_state.data_dict.values(), key=lambda x: x['날짜'])
         
-        # 화면 표시용 요약 테이블
         df_display = pd.DataFrame(sorted_list).drop('img', axis=1)
         df_display['금액'] = df_display['금액'].apply(lambda x: f"{x:,}")
-        st.subheader(f"📋 {selected_month}월 정리 내역 (날짜순)")
+        st.subheader(f"📋 {selected_month}월 정리 내역")
         st.table(df_display)
 
-        # ---------------- 엑셀 생성 (내장 양식 맞춤) ----------------
+        # 엑셀 생성
         output_excel = io.BytesIO()
         wb = Workbook()
         ws = wb.active
@@ -128,7 +120,7 @@ if uploaded_files:
         ws.cell(row=res_row, column=5, value=total_sum).number_format = '#,##0'; ws.cell(row=res_row, column=5).border = border
         wb.save(output_excel)
         
-        # ---------------- PDF 생성 (4분할 증빙) ----------------
+        # PDF 생성
         pdf_buffer = io.BytesIO()
         c = canvas.Canvas(pdf_buffer, pagesize=A4)
         w, h = A4
