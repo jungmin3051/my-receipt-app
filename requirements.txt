@@ -4,3 +4,4 @@ pandas
 openpyxl
 pillow
 reportlab
+st-gsheets-connection
