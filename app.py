@@ -7,6 +7,7 @@ import pytesseract
 import io
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
+from reportlab.lib.utils import ImageReader # 이 부분이 추가되었습니다.
 
 st.set_page_config(page_title="영수증 정리기", layout="centered")
 st.title("📑 법인카드 영수증 자동 정리")
@@ -22,7 +23,6 @@ if uploaded_files:
     if 'data_list' not in st.session_state:
         st.session_state.data_list = []
     
-    # 폼 생성 및 데이터 수집
     for idx, uploaded_file in enumerate(uploaded_files):
         img = Image.open(uploaded_file)
         try:
@@ -30,7 +30,7 @@ if uploaded_files:
         except:
             raw_text = ""
 
-        # 추출 로직 (날짜, 금액, 식당명)
+        # 추출 로직
         date_match = re.search(r'(?:매출일|일시|날짜|판매일)\s*[:]?\s*(\d{4}[-/.]\d{2}[-/.]\d{2})', raw_text)
         if not date_match:
              date_match = re.search(r'(\d{4}[-/.]\d{2}[-/.]\d{2})', raw_text)
@@ -49,7 +49,6 @@ if uploaded_files:
             with c2: store_val = st.text_input("식당명", extracted_store, key=f"s_{idx}")
             
             if st.form_submit_button(f"{idx+1}번 영수증 확정"):
-                # PDF 생성을 위해 이미지 객체도 함께 저장합니다.
                 st.session_state.data_list.append({
                     "date": date_val,
                     "store": store_val,
@@ -59,7 +58,7 @@ if uploaded_files:
                 st.success(f"{store_val} 추가됨!")
 
     if st.session_state.data_list:
-        # 1. 날짜 순 정렬
+        # 날짜 순 정렬
         st.session_state.data_list.sort(key=lambda x: x['date'])
         
         df = pd.DataFrame(st.session_state.data_list)[["date", "store", "price"]]
@@ -67,39 +66,40 @@ if uploaded_files:
 
         col_dl1, col_dl2 = st.columns(2)
         
-        # 2. 엑셀 다운로드
         with col_dl1:
             output_excel = io.BytesIO()
             with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, startrow=4, sheet_name='내역서')
             st.download_button("📈 엑셀 다운로드", output_excel.getvalue(), f"내역서_{user_name}.xlsx")
 
-        # 3. PDF 생성 (A4 한 장에 4개씩)
         with col_dl2:
             pdf_buffer = io.BytesIO()
             c = canvas.Canvas(pdf_buffer, pagesize=A4)
             width, height = A4
             
-            # 영수증 위치 설정 (2x2 배열)
+            # 4등분 위치 설정
             positions = [
-                (50, height/2 + 20, width/2 - 60, height/2 - 60), # 좌상
-                (width/2 + 10, height/2 + 20, width/2 - 60, height/2 - 60), # 우상
-                (50, 50, width/2 - 60, height/2 - 60), # 좌하
-                (width/2 + 10, 50, width/2 - 60, height/2 - 60) # 우하
+                (50, height/2 + 20, width/2 - 60, height/2 - 100), # 좌상
+                (width/2 + 10, height/2 + 20, width/2 - 60, height/2 - 100), # 우상
+                (50, 50, width/2 - 60, height/2 - 100), # 좌하
+                (width/2 + 10, 50, width/2 - 60, height/2 - 100) # 우하
             ]
             
             for i, item in enumerate(st.session_state.data_list):
                 pos_idx = i % 4
                 if i > 0 and pos_idx == 0:
-                    c.showPage() # 4개 다 차면 새 페이지
+                    c.showPage()
                 
                 x, y, w, h = positions[pos_idx]
                 
-                # 이미지 임시 저장 후 PDF에 삽입
+                # 이미지 처리 (에러 수정 부분)
                 img_temp = io.BytesIO()
                 item['img'].save(img_temp, format='JPEG')
                 img_temp.seek(0)
-                c.drawImage(io.BytesIO(img_temp.read()), x, y, width=w, height=h, preserveAspectRatio=True)
+                
+                # ImageReader를 사용해 BytesIO 데이터를 읽습니다.
+                c.drawImage(ImageReader(img_temp), x, y, width=w, height=h, preserveAspectRatio=True)
+                c.setFont("Helvetica", 10)
                 c.drawString(x, y-15, f"[{item['date']}] {item['store']}")
                 
             c.save()
