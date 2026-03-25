@@ -1,12 +1,12 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, time
+from datetime import datetime
 import re
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps  # 사진 회전 해결을 위해 ImageOps 추가
 import pytesseract
 import io
 import numpy as np
-import cv2  # 이 부분을 위해 requirements.txt 설정이 필요합니다
+import cv2
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
@@ -15,14 +15,14 @@ from openpyxl.styles import Alignment, Border, Side, Font
 
 st.set_page_config(page_title="영수증 정리기", layout="centered")
 
-# 1. 세션 상태 초기화
+# 1. 세션 상태 및 기본 정보 설정
 if 'user_name' not in st.session_state: st.session_state.user_name = "한정민"
 if 'data_dict' not in st.session_state: st.session_state.data_dict = {} 
 if 'ocr_cache' not in st.session_state: st.session_state.ocr_cache = {}
 
 st.title("📑 법인카드 영수증 자동 정리")
 
-# 사이드바 설정
+# 사이드바 설정 (선임님 양식 고정 정보)
 st.session_state.user_name = st.sidebar.text_input("성명", st.session_state.user_name)
 user_rank = st.sidebar.text_input("직책", "선임")
 card_num = st.sidebar.text_input("법인카드번호", "4265-8699-8653-1838")
@@ -36,20 +36,28 @@ if uploaded_files:
         file_key = uploaded_file.name
         
         if file_key not in st.session_state.ocr_cache:
-            # [한국어 강화 전처리 로직]
-            img = Image.open(uploaded_file)
+            # [이미지 회전 보정] 세로 사진이 가로로 나오는 문제 해결
+            raw_img = Image.open(uploaded_file)
+            img = ImageOps.exif_transpose(raw_img) # EXIF 정보를 바탕으로 정방향 회전
+            
+            # [한국어 강화 전처리] OpenCV 활용
             img_array = np.array(img.convert('RGB'))
             gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
             blur = cv2.GaussianBlur(gray, (3,3), 0)
+            # 적응형 이진화로 한국어 획을 또렷하게 만듦 
             thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
             
+            # OCR 엔진 설정 (한국어+영어 병행)
             custom_config = r'--oem 3 --psm 6 -l kor+eng'
             st.session_state.ocr_cache[file_key] = pytesseract.image_to_string(thresh, config=custom_config)
+            
+            # 화면 표시용 이미지 저장
+            st.session_state.data_dict[file_key + "_img"] = img
         
         raw_text = st.session_state.ocr_cache[file_key]
         clean_text = raw_text.replace(' ', '')
 
-        # 데이터 추출
+        # 데이터 자동 추출 (달러, 날짜, 금액)
         is_dollar = not bool(re.search(r'[ㄱ-ㅎㅏ-ㅣ가-힣]', raw_text))
         date_match = re.search(r'(\d{4})[-/.](\d{2})[-/.](\d{2})', raw_text)
         try:
@@ -61,8 +69,12 @@ if uploaded_files:
         lines = [l.strip() for l in raw_text.split('\n') if len(l.strip()) > 1]
         extracted_store = lines[0] if lines else "식당 직접 입력"
 
+        # 입력 폼
         with st.form(key=f"form_{file_key}"):
-            st.image(Image.open(uploaded_file), width=300)
+            # 회전 보정된 이미지 출력
+            current_img = st.session_state.data_dict.get(file_key + "_img", Image.open(uploaded_file))
+            st.image(current_img, width=300)
+            
             c1, c2, c3 = st.columns([1, 1.5, 1])
             with c1: d_val = st.date_input("날짜", default_date, key=f"d_{idx}")
             with c2: s_val = st.text_input("식당명", extracted_store, key=f"s_{idx}")
@@ -75,20 +87,22 @@ if uploaded_files:
             if st.form_submit_button("확정"):
                 st.session_state.data_dict[file_key] = {
                     "날짜": d_val.strftime('%y-%m-%d'), "식당명": s_val, "구분": m_val, 
-                    "금액": pr_val, "비고": r_val, "img": Image.open(uploaded_file)
+                    "금액": pr_val, "비고": r_val, "img": current_img
                 }
-                # 매뉴얼 아이콘 적용
-                st.success(f"**{s_val}** 반영 완료!", icon=":material/task_alt:")
+                # 매뉴얼에서 본 고급 아이콘 적용
+                st.success(f"**{s_val}** 내역 반영 완료!", icon=":material/task_alt:")
 
     if st.session_state.data_dict:
-        sorted_list = sorted(st.session_state.data_dict.values(), key=lambda x: x['날짜'])
+        # 데이터가 있는 것만 필터링 (이미지 캐시 제외)
+        final_items = [v for k, v in st.session_state.data_dict.items() if isinstance(v, dict)]
+        sorted_list = sorted(final_items, key=lambda x: x['날짜'])
         
         df_display = pd.DataFrame(sorted_list).drop('img', axis=1)
         df_display['금액'] = df_display['금액'].apply(lambda x: f"{x:,}")
-        st.subheader(f"📋 {selected_month}월 정리 내역")
+        st.subheader(f"📋 {selected_month}월 정리 내역 요약")
         st.table(df_display)
 
-        # 엑셀 생성
+        # ---------------- 엑셀 생성 (선임님 전용 양식) ----------------
         output_excel = io.BytesIO()
         wb = Workbook()
         ws = wb.active
@@ -120,7 +134,7 @@ if uploaded_files:
         ws.cell(row=res_row, column=5, value=total_sum).number_format = '#,##0'; ws.cell(row=res_row, column=5).border = border
         wb.save(output_excel)
         
-        # PDF 생성
+        # ---------------- PDF 생성 (회전 보정 이미지 반영) ----------------
         pdf_buffer = io.BytesIO()
         c = canvas.Canvas(pdf_buffer, pagesize=A4)
         w, h = A4
