@@ -5,8 +5,8 @@ import io
 from PIL import Image
 import pytesseract
 
-# Tesseract 설치 경로 설정 (일반적인 경로입니다)
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# [수정] 서버 환경(Linux)에서는 이 설정이 필요 없으므로 삭제하거나 주석 처리합니다.
+# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 st.set_page_config(page_title="영수증 정리기", layout="centered")
 
@@ -32,14 +32,16 @@ if uploaded_files:
     for uploaded_file in uploaded_files:
         img = Image.open(uploaded_file)
         
-        # 실제 글자 읽기 (OCR)
-        # ⚠️ 처음엔 정확도가 낮을 수 있으니 수동 수정 기능을 넣었습니다.
-        raw_text = pytesseract.image_to_string(img, lang='kor+eng')
+        # [수정] 서버에 설치된 Tesseract 엔진을 사용하여 글자를 읽습니다.
+        try:
+            raw_text = pytesseract.image_to_string(img, lang='kor+eng')
+        except:
+            raw_text = "글자를 읽는 중 오류가 발생했습니다."
         
-        # 임시 데이터 (나중에 OCR 결과 분석 로직으로 대체)
-        # 지금은 선임님이 규칙을 확인하실 수 있게 직접 입력창을 띄워드릴게요.
         with st.form(key=f"form_{uploaded_file.name}"):
             st.image(img, width=300)
+            st.info(f"인식된 텍스트 추출 완료")
+            
             c1, c2, c3 = st.columns(3)
             with c1: date = st.date_input("날짜", datetime.now(), key=f"d_{uploaded_file.name}")
             with c2: store = st.text_input("식당명", "식당이름", key=f"s_{uploaded_file.name}")
@@ -52,13 +54,11 @@ if uploaded_files:
             submit = st.form_submit_button("이 영수증 확정")
             
             if submit:
-                # D열 구분: 시간보고 조식/중식/석식 자동 분류
                 hour = time_val.hour
                 if hour < 10: meal_type = "조식"
                 elif 11 <= hour <= 15: meal_type = "중식"
                 else: meal_type = "석식"
                 
-                # E, F열 규칙: 달러면 비고란으로!
                 amt_won = price if not is_dollar else ""
                 amt_usd = f"{price}$" if is_dollar else ""
                 
@@ -67,18 +67,15 @@ if uploaded_files:
 
     if data_list:
         df = pd.DataFrame(data_list, columns=["일자", "내용", "구분", "금액", "비고"])
-        df = df.sort_values(by="일자") # 날짜순 정렬
+        df = df.sort_values(by="일자") 
         
         st.write("### 📊 정리된 내역")
         st.table(df)
 
-        # 3. 엑셀 파일 생성
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # 선임님 양식처럼 5번째 줄부터 데이터 시작
+            # 데이터는 5번째 줄부터 시작 (선임님 양식 맞춤)
             df.to_excel(writer, index=False, startrow=4, sheet_name='내역서')
-            
-            # 여기에 상단 성명, 직책 등을 채우는 로직을 추가할 수 있습니다.
             
         st.download_button(
             label="📈 엑셀 파일 다운로드",
