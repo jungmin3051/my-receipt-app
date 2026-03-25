@@ -5,6 +5,8 @@ import re
 from PIL import Image, ImageOps
 import pytesseract
 import io
+import numpy as np
+import cv2
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.utils import ImageReader
@@ -33,16 +35,26 @@ if uploaded_files:
     for idx, uploaded_file in enumerate(uploaded_files):
         file_key = uploaded_file.name
         
-        # OCR 최적화
         if file_key not in st.session_state.ocr_cache:
+            # [한국어 강화 전처리] OpenCV 활용
             img = Image.open(uploaded_file)
-            gray_img = ImageOps.grayscale(img)
-            st.session_state.ocr_cache[file_key] = pytesseract.image_to_string(gray_img, lang='kor+eng')
+            img_array = np.array(img.convert('RGB'))
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            
+            # 가우시안 블러로 미세 노이즈 제거
+            blur = cv2.GaussianBlur(gray, (3,3), 0)
+            
+            # 적응형 이진화: 한국어 획을 더 또렷하게 만듦 
+            thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+            
+            # OCR 엔진 설정 (한국어+영어 병행)
+            custom_config = r'--oem 3 --psm 6 -l kor+eng'
+            st.session_state.ocr_cache[file_key] = pytesseract.image_to_string(thresh, config=custom_config)
         
         raw_text = st.session_state.ocr_cache[file_key]
         clean_text = raw_text.replace(' ', '')
 
-        # 데이터 자동 추출 (달러 여부, 날짜, 식사구분, 금액)
+        # 데이터 추출 (달러 여부, 날짜, 식사구분, 금액)
         is_dollar = not bool(re.search(r'[ㄱ-ㅎㅏ-ㅣ가-힣]', raw_text))
         date_match = re.search(r'(\d{4})[-/.](\d{2})[-/.](\d{2})', raw_text)
         try:
@@ -51,7 +63,9 @@ if uploaded_files:
         
         price_match = re.search(r'(?:TOTAL|AMOUNT|합계|결제|금액)[:]?\s*([\d,.]+)', clean_text, re.I)
         extracted_price = int(price_match.group(1).replace(',', '').split('.')[0]) if price_match else 0
-        lines = [l.strip() for l in raw_text.split('\n') if len(l.strip()) > 2]
+        
+        # 식당명 추출 로직 강화 (의미 없는 짧은 줄 제외)
+        lines = [l.strip() for l in raw_text.split('\n') if len(l.strip()) > 1]
         extracted_store = lines[0] if lines else "식당 직접 입력"
 
         with st.form(key=f"form_{file_key}"):
@@ -70,20 +84,19 @@ if uploaded_files:
                     "날짜": d_val.strftime('%y-%m-%d'), "식당명": s_val, "구분": m_val, 
                     "금액": pr_val, "비고": r_val, "img": Image.open(uploaded_file)
                 }
-                # 매뉴얼에서 확인하신 Material Symbol 적용
-                st.success(f"**{s_val}** 내역 반영 완료!", icon=":material/task_alt:")
+                # 매뉴얼에서 확인한 고급 아이콘 적용
+                st.success(f"**{s_val}** 반영 완료!", icon=":material/task_alt:")
 
     if st.session_state.data_dict:
-        # 날짜순 정렬 (결제일 빠른 순)
         sorted_list = sorted(st.session_state.data_dict.values(), key=lambda x: x['날짜'])
         
-        # 표 표시용 데이터프레임
+        # 화면 표시용 요약 테이블
         df_display = pd.DataFrame(sorted_list).drop('img', axis=1)
         df_display['금액'] = df_display['금액'].apply(lambda x: f"{x:,}")
         st.subheader(f"📋 {selected_month}월 정리 내역 (날짜순)")
         st.table(df_display)
 
-        # ---------------- 엑셀 생성 부분 ----------------
+        # ---------------- 엑셀 생성 (내장 양식 맞춤) ----------------
         output_excel = io.BytesIO()
         wb = Workbook()
         ws = wb.active
@@ -115,11 +128,10 @@ if uploaded_files:
         ws.cell(row=res_row, column=5, value=total_sum).number_format = '#,##0'; ws.cell(row=res_row, column=5).border = border
         wb.save(output_excel)
         
-        # ---------------- PDF 생성 부분 (완벽 복구!) ----------------
+        # ---------------- PDF 생성 (4분할 증빙) ----------------
         pdf_buffer = io.BytesIO()
         c = canvas.Canvas(pdf_buffer, pagesize=A4)
         w, h = A4
-        # A4 4분할 좌표 설정
         pos = [(50, h/2+20, w/2-60, h/2-100), (w/2+10, h/2+20, w/2-60, h/2-100),
                (50, 50, w/2-60, h/2-100), (w/2+10, 50, w/2-60, h/2-100)]
         
@@ -133,7 +145,6 @@ if uploaded_files:
             c.drawString(px, py-15, f"[{item['날짜']}] {item['식당명']}")
         c.save()
         
-        # 다운로드 버튼 출력
         col_ex, col_pdf = st.columns(2)
         excel_fn = f"{selected_month}월 개인법인카드 사용내역서_{st.session_state.user_name}.xlsx"
         pdf_fn = f"{selected_month}월 개인법인카드 영수증_{st.session_state.user_name}.pdf"
