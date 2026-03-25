@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, time
 import re
-from PIL import Image
+from PIL import Image, ImageOps
 import pytesseract
 import io
 from reportlab.pdfgen import canvas
@@ -11,7 +11,7 @@ from reportlab.lib.utils import ImageReader
 
 st.set_page_config(page_title="영수증 정리기", layout="centered")
 
-# 1. 브라우저 새로고침 시 데이터 유지 및 중복 방지
+# 데이터 유지 및 중복 방지
 if 'user_name' not in st.session_state:
     st.session_state.user_name = "한정민"
 if 'data_dict' not in st.session_state:
@@ -30,20 +30,31 @@ if uploaded_files:
     for idx, uploaded_file in enumerate(uploaded_files):
         file_key = uploaded_file.name
         
-        # 속도 최적화: 캐시 활용
         if file_key not in st.session_state.ocr_cache:
             img = Image.open(uploaded_file)
-            raw_text = pytesseract.image_to_string(img, lang='kor')
+            # 인식률 향상을 위한 전처리 (흑백 전환)
+            gray_img = ImageOps.grayscale(img)
+            raw_text = pytesseract.image_to_string(gray_img, lang='kor+eng')
             st.session_state.ocr_cache[file_key] = raw_text
         
         raw_text = st.session_state.ocr_cache[file_key]
         clean_text = raw_text.replace(' ', '')
 
-        # 1. 날짜 추출
+        # 1. 달러 결제 여부 확인 (한글이 하나도 없는 경우)
+        is_dollar = not bool(re.search(r'[ㄱ-ㅎㅏ-ㅣ가-힣]', raw_text))
+        remark_default = "달러 결제" if is_dollar else ""
+
+        # 2. 날짜 추출 및 달력용 데이터 변환
         date_match = re.search(r'(\d{4})[-/.](\d{2})[-/.](\d{2})', raw_text)
-        extracted_date = f"{date_match.group(1)[2:]}-{date_match.group(2)}-{date_match.group(3)}" if date_match else datetime.now().strftime('%y-%m-%d')
+        try:
+            if date_match:
+                default_date = datetime.strptime(date_match.group(0).replace('.','-').replace('/','-'), '%Y-%m-%d')
+            else:
+                default_date = datetime.now()
+        except:
+            default_date = datetime.now()
         
-        # 2. 식사 구분 (ValueError 방지 로직 추가)
+        # 3. 식사 구분
         time_match = re.search(r'(\d{2}):(\d{2})', raw_text)
         meal_type = "석식"
         if time_match:
@@ -52,41 +63,45 @@ if uploaded_files:
                 check_time = time(h, m)
                 if time(3, 1) <= check_time <= time(10, 0): meal_type = "조식"
                 elif time(10, 1) <= check_time <= time(15, 0): meal_type = "중식"
-            except ValueError:
-                pass # 시간이 이상하게 읽히면 기본 '석식' 유지
+            except: pass
 
-        # 3. 금액 및 식당명
-        price_match = re.search(r'(?:합계|결제|금액)[:]?([\d,]{3,})', clean_text)
-        extracted_price = int(price_match.group(1).replace(',', '')) if price_match else 0
-        store_match = re.search(r'(?:상호|매장명)[:]?\s*([^\n\d\(\)/]+)', raw_text)
-        extracted_store = store_match.group(1).strip() if store_match else raw_text.split('\n')[0][:15]
+        # 4. 금액 및 식당명
+        price_match = re.search(r'(?:TOTAL|AMOUNT|합계|결제|금액)[:]?\s*([\d,.]+)', clean_text, re.I)
+        extracted_price = price_match.group(1).replace(',', '').split('.')[0] if price_match else "0"
+        
+        # 식당명: 상단 텍스트 중 의미 있는 첫 줄 추출
+        lines = [l.strip() for l in raw_text.split('\n') if len(l.strip()) > 2]
+        extracted_store = lines[0] if lines else "식당 직접 입력"
 
-        # 입력 폼 (파일명이 키가 되어 자동 덮어쓰기)
         with st.form(key=f"form_{file_key}"):
             st.image(Image.open(uploaded_file), width=300)
             c1, c2, c3 = st.columns([1, 1.5, 1])
-            with c1: d_val = st.text_input("날짜", extracted_date, key=f"d_{idx}")
+            # [센스 1] 날짜 입력 시 작은 달력이 뜨도록 수정
+            with c1: d_val = st.date_input("날짜", default_date, key=f"d_{idx}")
             with c2: s_val = st.text_input("식당명", extracted_store, key=f"s_{idx}")
             with c3: m_val = st.selectbox("구분", ["조식", "중식", "석식"], 
                                          index=["조식", "중식", "석식"].index(meal_type), key=f"m_{idx}")
             
             p1, p2 = st.columns(2)
-            with p1: pr_val = st.number_input("금액", value=extracted_price, key=f"p_{idx}")
-            with p2: r_val = st.text_input("비고(달러 등)", "", key=f"r_{idx}")
+            with p1: pr_val = st.number_input("금액", value=int(extracted_price), key=f"p_{idx}")
+            with p2: r_val = st.text_input("비고(달러 등)", remark_default, key=f"r_{idx}")
             
             if st.form_submit_button("확정 (수정 후 다시 누르면 교체됨)"):
+                formatted_date = d_val.strftime('%y-%m-%d') # 선임님 요청 YY-MM-DD 형식
                 st.session_state.data_dict[file_key] = {
-                    "날짜": d_val, "식당명": s_val, "구분": m_val, 
+                    "날짜": formatted_date, "식당명": s_val, "구분": m_val, 
                     "금액": pr_val, "비고": r_val, "img": Image.open(uploaded_file)
                 }
-                st.success(f"'{s_val}' 내역이 최신 정보로 반영되었습니다!")
+                st.success(f"반영 완료!")
 
     if st.session_state.data_dict:
-        # 결제일 빠른 순(오름차순)으로 정렬
         sorted_list = sorted(st.session_state.data_dict.values(), key=lambda x: x['날짜'])
         df = pd.DataFrame(sorted_list).drop('img', axis=1)
         
-        st.subheader("📋 확정된 내역 (날짜순 정렬됨)")
+        # [센스 2] 금액 부분 세자리마다 쉼표 표시
+        df['금액'] = df['금액'].apply(lambda x: f"{x:,}")
+        
+        st.subheader("📋 확정된 내역 (날짜순)")
         st.table(df)
 
         col_ex, col_pdf = st.columns(2)
