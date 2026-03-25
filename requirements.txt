@@ -1,6 +1,6 @@
-streamlit
+opencv-python-headless
+pytesseract
 pandas
 openpyxl
 pillow
-pytesseract
 reportlab
