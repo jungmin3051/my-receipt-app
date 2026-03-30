@@ -1,7 +1,10 @@
-opencv-python-headless
-pytesseract
+streamlit
+streamlit-gsheets
 pandas
+Pillow
+pytesseract
+opencv-python-headless
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
 openpyxl
-pillow
-reportlab
-st-gsheets-connection
