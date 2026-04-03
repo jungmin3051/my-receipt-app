@@ -129,4 +129,4 @@ if not all_data.empty:
             rep_df.drop(columns=["사진데이터", "상태", "priority"], errors='ignore').to_excel(ex_out, index=False)
             st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
         with d2:
-            st.download_button("📄 PDF 다운로드", create_photo_pdf(done_df), "Receipt_Photos.pdf", "application/pdf")
+            st.download_button("📄 PDF 다운로드", create_photo_pdf(done_df), "0월 개인법인카드 영수증_한정민.pdf", "application/pdf")
