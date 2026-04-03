@@ -4,13 +4,48 @@ import pandas as pd
 from datetime import datetime
 import io
 import base64
+import json
 from PIL import Image, ImageOps
 from fpdf import FPDF
+from google.cloud import vision
+from google.oauth2 import service_account
 
 # 0. 기본 설정
 st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
+
+# [OCR] Google Vision API 설정
+def analyze_receipt(image_bytes):
+    try:
+        # Secrets에서 열쇠 꺼내기
+        key_dict = json.loads(st.secrets["google_cloud_key"])
+        creds = service_account.Credentials.from_service_account_info(key_dict)
+        client = vision.ImageAnnotatorClient(credentials=creds)
+        
+        image = vision.Image(content=image_bytes)
+        response = client.text_detection(image=image)
+        texts = response.text_annotations
+        
+        if not texts: return "인식 실패", "0"
+        
+        full_text = texts[0].description
+        lines = full_text.split('\n')
+        
+        # 1. 식당명: 보통 첫 번째 줄에 상호명이 있음 (다이소, 오렌지푸드 등)
+        res_name = lines[0].strip() if lines else "알 수 없음"
+        
+        # 2. 금액: 숫자와 콤마 조합 중 가장 큰 값을 찾거나 '원' 앞의 숫자 추출
+        price = "0"
+        for line in lines:
+            if '원' in line or ',' in line:
+                clean_p = ''.join(filter(str.isdigit, line))
+                if clean_p and int(clean_p) > 100: # 최소 금액 필터링
+                    price = f"{int(clean_p):,}"
+                    break
+        return res_name, price
+    except Exception as e:
+        return f"에러: {str(e)[:20]}", "0"
 
 def get_meal_priority(meal_name):
     priority = {"조식": 1, "중식": 2, "석식": 3}
@@ -21,22 +56,8 @@ def img_to_base64(image):
     if image.mode != 'RGB': image = image.convert('RGB')
     image.thumbnail((800, 800)) 
     buffered = io.BytesIO()
-    image.save(buffered, format="JPEG", quality=40) 
-    return base64.b64encode(buffered.getvalue()).decode()
-
-def create_photo_pdf(df):
-    pdf = FPDF()
-    df['priority'] = df['시간대'].apply(get_meal_priority)
-    df_sorted = df.sort_values(by=["날짜", "priority"], ascending=[True, True])
-    for i, (_, row) in enumerate(df_sorted.iterrows()):
-        if i % 4 == 0: pdf.add_page()
-        try:
-            img_data = base64.b64decode(row["사진데이터"])
-            temp_img = io.BytesIO(img_data)
-            x, y = (10 if i % 2 == 0 else 105), (10 if i % 4 < 2 else 148)
-            pdf.image(temp_img, x=x, y=y, w=90)
-        except: continue
-    return bytes(pdf.output())
+    image.save(buffered, format="JPEG", quality=50) 
+    return base64.b64encode(buffered.getvalue()).decode(), buffered.getvalue()
 
 # 1. 데이터 불러오기
 try:
@@ -45,26 +66,38 @@ try:
 except:
     all_data = pd.DataFrame(columns=["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"])
 
-st.title("📑 법카 영수증 관리")
+st.title("📑 법카 영수증 관리 (AI)")
 
-# --- 1단계: 사진 업로드 ---
+# --- 1단계: 사진 업로드 및 AI 자동 인식 ---
 with st.expander("📸 1단계: 사진 업로드", expanded=True):
-    files = st.file_uploader("사진 선택", accept_multiple_files=True)
-    if files and st.button("🚀 사진 전송"):
+    files = st.file_uploader("영수증 사진 선택", accept_multiple_files=True)
+    if files and st.button("🚀 사진 전송 및 AI 분석"):
         new_list = []
         now = datetime.now()
         auto_meal = "조식" if now.hour < 10 else "중식" if now.hour < 16 else "석식"
-        with st.spinner("이미지 최적화 중..."):
+        
+        with st.spinner("AI가 영수증 글자를 읽고 있습니다..."):
             for f in files:
-                try:
-                    img_b64 = img_to_base64(Image.open(f))
-                    new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": auto_meal, "금액": "0", "비고": "", "사진데이터": img_b64, "상태": "대기"})
-                except Exception as e: st.error(f"오류: {e}")
+                img_b64, img_bytes = img_to_base64(Image.open(f))
+                # [핵심] 여기서 AI가 식당명이랑 금액을 알아냅니다!
+                ai_res, ai_price = analyze_receipt(img_bytes)
+                
+                new_list.append({
+                    "날짜": now.strftime('%y-%m-%d'), 
+                    "식당명": ai_res, # AI가 찾은 이름 자동 입력
+                    "시간대": auto_meal, 
+                    "금액": ai_price, # AI가 찾은 금액 자동 입력 (콤마 포함)
+                    "비고": "AI 자동인식", 
+                    "사진데이터": img_b64, "상태": "대기"
+                })
+        
         if new_list:
             updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated)
             st.cache_data.clear()
             st.rerun()
+
+# --- 2단계 & 3단계는 이전과 동일 (생략 없이 선임님 코드에 덮어쓰기 하시면 됩니다) ---
 
 # --- 2단계: 내용 수정 및 삭제 ---
 st.divider()
