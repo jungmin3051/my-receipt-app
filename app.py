@@ -10,14 +10,7 @@ from fpdf import FPDF
 # 0. 기본 설정
 st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
-
-# [수정] Secrets와 코드 간의 인자 충돌(type)을 방지하는 안전 장치입니다.
-if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
-    conn_params = st.secrets["connections"]["gsheets"].to_dict()
-    conn_params.pop("type", None) # Secrets의 type과 코드의 type 충돌 방지
-    conn = st.connection("gsheets", type=GSheetsConnection, **conn_params)
-else:
-    conn = st.connection("gsheets", type=GSheetsConnection)
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_meal_priority(meal_name):
     priority = {"조식": 1, "중식": 2, "석식": 3}
@@ -33,9 +26,8 @@ def img_to_base64(image):
 
 def create_photo_pdf(df):
     pdf = FPDF()
-    df_copy = df.copy()
-    df_copy['priority'] = df_copy['시간대'].apply(get_meal_priority)
-    df_sorted = df_copy.sort_values(by=["날짜", "priority"], ascending=[True, True])
+    df['priority'] = df['시간대'].apply(get_meal_priority)
+    df_sorted = df.sort_values(by=["날짜", "priority"], ascending=[True, True])
     for i, (_, row) in enumerate(df_sorted.iterrows()):
         if i % 4 == 0: pdf.add_page()
         try:
@@ -100,6 +92,7 @@ if not all_data.empty:
             meal_opts = ["조식", "중식", "석식"]
             curr_m = row["시간대"] if row["시간대"] in meal_opts else "중식"
             u_meal = st.selectbox("시간대", meal_opts, index=meal_opts.index(curr_m))
+            # 금액 표시 처리 (콤마 유지)
             p_val = str(row["금액"]).replace(',', '').split('.')[0]
             d_price = f"{int(p_val):,}" if p_val.isdigit() else p_val
             u_price = st.text_input("금액", value=d_price)
@@ -108,6 +101,7 @@ if not all_data.empty:
         b_c1, b_c2 = st.columns(2)
         with b_c1:
             if st.button("💾 저장 및 수정", use_container_width=True):
+                # 저장할 때 콤마를 붙여서 저장
                 clean_p = u_price.replace(',', '')
                 final_p = f"{int(clean_p):,}" if clean_p.isdigit() else u_price
                 row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": final_p, "비고": u_note, "상태": "완료"})
@@ -127,6 +121,7 @@ if not all_data.empty:
 if not all_data.empty:
     st.divider()
     st.subheader("👀 현재 저장된 내역")
+    # 화면에 보여줄 때도 콤마 적용
     disp_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
     st.dataframe(disp_df, use_container_width=True)
 
