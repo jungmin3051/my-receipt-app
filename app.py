@@ -8,7 +8,7 @@ from PIL import Image, ImageOps
 from fpdf import FPDF
 
 # 0. 기본 설정
-st.set_page_config(page_title="법카 영수증 관리", layout="wide")
+st.set_page_config(page_title="영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
