@@ -21,7 +21,6 @@ def img_to_base64(image):
 
 def create_photo_pdf(df):
     pdf = FPDF()
-    # [센스] 날짜와 시간대순으로 정렬해서 PDF 생성
     df_sorted = df.sort_values(by=["날짜", "시간대"], ascending=[True, True])
     for i, (_, row) in enumerate(df_sorted.iterrows()):
         if i % 4 == 0: pdf.add_page()
@@ -33,16 +32,16 @@ def create_photo_pdf(df):
         except: continue
     return bytes(pdf.output())
 
-st.title("📑 법카 영수증 관리 (한정민 선임 전용)")
+st.title("📑 법카 영수증 관리 (한정민 선임)")
 
-# 1. 데이터 불러오기 및 정렬/청소
-raw_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str) # 모든 데이터를 문자로 강제 변환
-all_data = raw_data[raw_data["사진데이터"] != "nan"].fillna("") # 빈 데이터 정리
+# 1. 데이터 불러오기 및 타입 정리
+raw_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
+all_data = raw_data[raw_data["사진데이터"] != "nan"].fillna("")
 if not all_data.empty:
     all_data = all_data.sort_values(by=["날짜", "시간대"], ascending=[True, True])
 
 # --- 1단계: 사진 업로드 ---
-with st.expander("📸 1단계: 사진 업로드 (날짜순 자동 줄세우기)", expanded=True):
+with st.expander("📸 1단계: 사진 업로드", expanded=True):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files and st.button("🚀 사진 전송"):
         new_list = []
@@ -52,17 +51,15 @@ with st.expander("📸 1단계: 사진 업로드 (날짜순 자동 줄세우기)
             img_b64 = img_to_base64(Image.open(f))
             new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": meal, "금액": "0", "비고": "", "사진데이터": img_b64, "상태": "대기"})
         updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
-        updated = updated.sort_values(by=["날짜", "시간대"], ascending=[True, True])
         conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated)
-        st.success("날짜순으로 정렬하여 업로드 완료!")
         st.rerun()
 
 # --- 2단계: 내역 수정 ---
 st.divider()
 if not all_data.empty:
-    st.subheader("💻 2단계: 상세 내용 수정 (달력/시간대)")
+    st.subheader("💻 2단계: 상세 내용 수정")
     row_list = all_data.to_dict('records')
-    idx = st.selectbox("수정할 항목", range(len(row_list)), format_func=lambda x: f"[{x}] {row_list[x]['날짜']} {row_list[x]['식당명']}")
+    idx = st.selectbox("수정 항목 선택", range(len(row_list)), format_func=lambda x: f"[{x}] {row_list[x]['날짜']} {row_list[x]['식당명']}")
     row = row_list[idx]
     
     c1, c2 = st.columns([1, 2])
@@ -72,15 +69,23 @@ if not all_data.empty:
         with f1:
             try: d_val = datetime.strptime(row["날짜"], '%y-%m-%d')
             except: d_val = datetime.now()
-            u_date = st.date_input("날짜 선택", d_val)
+            u_date = st.date_input("날짜", d_val)
             u_name = st.text_input("식당명", row["식당명"])
         with f2:
             u_meal = st.selectbox("시간대", ["조식", "중식", "석식"], index=["조식", "중식", "석식"].index(row["시간대"]) if row["시간대"] in ["조식", "중식", "석식"] else 1)
-            u_price = st.text_input("금액", row["금액"])
-        u_note = st.text_area("비고 (빈칸 가능)", row["비고"])
+            # [센스] 금액 처리: .0 제거 후 콤마 추가
+            clean_price = str(row["금액"]).split('.')[0].replace(',', '')
+            try: formatted_price = f"{int(clean_price):,}" if clean_price.isdigit() else clean_price
+            except: formatted_price = clean_price
+            u_price = st.text_input("금액", value=formatted_price)
+        
+        # [센스] 비고 칸 높이를 다른 입력창과 동일하게 (label_visibility로 간격 조정)
+        u_note = st.text_input("비고", row["비고"]) 
         
         if st.button("💾 저장 및 정렬"):
-            row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": u_price, "비고": u_note, "상태": "완료"})
+            # 저장할 때는 다시 콤마 제거
+            save_price = u_price.replace(',', '')
+            row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": save_price, "비고": u_note, "상태": "완료"})
             new_df = pd.DataFrame(row_list).sort_values(by=["날짜", "시간대"], ascending=[True, True])
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df)
             st.rerun()
@@ -89,12 +94,15 @@ if not all_data.empty:
     st.divider()
     done_df = all_data[all_data["상태"] == "완료"]
     if not done_df.empty:
-        st.subheader("📥 3단계: 최종 결과물 다운로드 (날짜순 정렬됨)")
+        st.subheader("📥 3단계: 결과물 다운로드")
         col_ex, col_pdf = st.columns(2)
         with col_ex:
             excel_out = io.BytesIO()
-            done_df.drop(columns=["사진데이터", "상태"]).to_excel(excel_out, index=False)
-            st.download_button("📊 엑셀 내역서 받기", excel_out.getvalue(), "Receipt_List.xlsx")
+            # 엑셀 저장 시에도 금액 포맷 적용
+            report_df = done_df.copy()
+            report_df["금액"] = report_df["금액"].apply(lambda x: f"{int(float(x)):,}" if str(x).replace('.','').isdigit() else x)
+            report_df.drop(columns=["사진데이터", "상태"]).to_excel(excel_out, index=False)
+            st.download_button("📊 엑셀 내역서 다운로드", excel_out.getvalue(), "Receipt_List.xlsx")
         with col_pdf:
             pdf_bytes = create_photo_pdf(done_df)
-            st.download_button("📄 PDF 사진증빙 받기", pdf_bytes, "Receipt_Photos.pdf", "application/pdf")
+            st.download_button("📄 PDF 사진증빙 다운로드", pdf_bytes, "Receipt_Photos.pdf", "application/pdf")
