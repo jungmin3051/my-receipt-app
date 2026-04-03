@@ -13,7 +13,7 @@ from google.oauth2 import service_account
 # 0. 기본 설정
 st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
-conn = st.connection("gsheets", type=GSheetsConnection)
+conn = st.connection("gsheets", type=GSheetsConnection, **st.secrets["google_cloud_key"])
 
 # [OCR] Google Vision API 설정
 def analyze_receipt(image_bytes):
