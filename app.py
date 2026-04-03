@@ -54,7 +54,7 @@ except Exception as e:
     st.error("데이터를 불러오는 중 API 오류가 발생했습니다. 잠시 후 새로고침(F5) 해주세요.")
     all_data = default_df
 
-st.title("📑 법카 영수증 관리 (한정민 선임)")
+st.title("📑 법카 영수증 관리")
 
 # --- 1단계: 사진 업로드 ---
 with st.expander("📸 1단계: 사진 업로드", expanded=True):
