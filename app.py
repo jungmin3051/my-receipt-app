@@ -16,17 +16,11 @@ def get_meal_priority(meal_name):
     priority = {"조식": 1, "중식": 2, "석식": 3}
     return priority.get(meal_name, 2)
 
-# [핵심] 폰 사진 최적화 함수 (용량 다이어트)
 def img_to_base64(image):
-    # 1. 폰 사진의 회전 정보 보정
     image = ImageOps.exif_transpose(image)
-    # 2. RGB 모드로 통일 (아이폰 HEIC 변환 대응)
-    if image.mode != 'RGB':
-        image = image.convert('RGB')
-    # 3. 해상도 대폭 축소 (증빙용으로 충분한 수준)
+    if image.mode != 'RGB': image = image.convert('RGB')
     image.thumbnail((800, 800)) 
     buffered = io.BytesIO()
-    # 4. 압축률 높여서 용량 최소화 (quality=40)
     image.save(buffered, format="JPEG", quality=40) 
     return base64.b64encode(buffered.getvalue()).decode()
 
@@ -55,33 +49,27 @@ st.title("📑 법카 영수증 관리")
 
 # --- 1단계: 사진 업로드 ---
 with st.expander("📸 1단계: 사진 업로드", expanded=True):
-    files = st.file_uploader("사진 선택 (폰 촬영 가능)", accept_multiple_files=True)
+    files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files and st.button("🚀 사진 전송"):
         new_list = []
         now = datetime.now()
-        curr_h = now.hour
-        auto_meal = "조식" if curr_h < 10 else "중식" if curr_h < 16 else "석식"
-        
-        # 로딩 스피너 추가 (전송 중임을 표시)
-        with st.spinner("이미지 최적화 및 전송 중..."):
+        auto_meal = "조식" if now.hour < 10 else "중식" if now.hour < 16 else "석식"
+        with st.spinner("이미지 최적화 중..."):
             for f in files:
                 try:
                     img_b64 = img_to_base64(Image.open(f))
                     new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": auto_meal, "금액": "0", "비고": "", "사진데이터": img_b64, "상태": "대기"})
-                except Exception as e:
-                    st.error(f"사진 처리 중 오류 발생: {e}")
-        
+                except Exception as e: st.error(f"오류: {e}")
         if new_list:
             updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated)
             st.cache_data.clear()
-            st.success("전송 완료!")
             st.rerun()
 
-# --- 2단계: 내역 수정 및 삭제 ---
+# --- 2단계: 내용 수정 및 삭제 ---
 st.divider()
 if not all_data.empty:
-    st.subheader("💻 2단계: 상세 내용 수정 및 삭제")
+    st.subheader("💻 2단계: 내용 수정 및 삭제")
     all_data['priority'] = all_data['시간대'].apply(get_meal_priority)
     sorted_data = all_data.sort_values(by=["날짜", "priority"], ascending=[True, True])
     row_list = sorted_data.to_dict('records')
@@ -104,15 +92,19 @@ if not all_data.empty:
             meal_opts = ["조식", "중식", "석식"]
             curr_m = row["시간대"] if row["시간대"] in meal_opts else "중식"
             u_meal = st.selectbox("시간대", meal_opts, index=meal_opts.index(curr_m))
-            c_price = str(row["금액"]).split('.')[0].replace(',', '')
-            f_price = f"{int(c_price):,}" if c_price.isdigit() else c_price
-            u_price = st.text_input("금액", value=f_price)
+            # 금액 표시 처리 (콤마 유지)
+            p_val = str(row["금액"]).replace(',', '').split('.')[0]
+            d_price = f"{int(p_val):,}" if p_val.isdigit() else p_val
+            u_price = st.text_input("금액", value=d_price)
         u_note = st.text_input("비고", row["비고"])
         
         b_c1, b_c2 = st.columns(2)
         with b_c1:
-            if st.button("💾 저장", use_container_width=True):
-                row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": u_price.replace(',', ''), "비고": u_note, "상태": "완료"})
+            if st.button("💾 저장 및 수정", use_container_width=True):
+                # 저장할 때 콤마를 붙여서 저장
+                clean_p = u_price.replace(',', '')
+                final_p = f"{int(clean_p):,}" if clean_p.isdigit() else u_price
+                row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": final_p, "비고": u_note, "상태": "완료"})
                 new_df = pd.DataFrame(row_list).drop(columns=['priority'], errors='ignore')
                 conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df)
                 st.cache_data.clear()
@@ -129,7 +121,9 @@ if not all_data.empty:
 if not all_data.empty:
     st.divider()
     st.subheader("👀 현재 저장된 내역")
-    st.dataframe(all_data.drop(columns=["사진데이터", "priority"], errors='ignore'), use_container_width=True)
+    # 화면에 보여줄 때도 콤마 적용
+    disp_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
+    st.dataframe(disp_df, use_container_width=True)
 
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"] if not all_data.empty else pd.DataFrame()
@@ -141,6 +135,5 @@ if not done_df.empty:
         done_df.drop(columns=["사진데이터", "상태", "priority"], errors='ignore').to_excel(ex_out, index=False)
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
     with d2:
-        curr_month = datetime.now().month
-        pdf_fn = f"{curr_month}월 개인법인카드 영수증_한정민.pdf"
+        pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
         st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf")
