@@ -13,3 +13,10 @@ fpdf2
 streamlit-gsheets
 google-cloud-vision
 fpdf
+streamlit
+streamlit-gsheets
+pandas
+Pillow
+google-cloud-vision
+fpdf
+openpyxl
