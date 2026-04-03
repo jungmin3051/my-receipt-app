@@ -10,7 +10,12 @@ from fpdf import FPDF
 # 0. 기본 설정
 st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
-conn = st.connection("gsheets", type=GSheetsConnection, **st.secrets["connections"]["gsheets"])
+if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
+    conn_dict = st.secrets["connections"]["gsheets"].to_dict()
+    conn_dict.pop("type", None) # 중복 충돌 방지
+    conn = st.connection("gsheets", type=GSheetsConnection, **conn_dict)
+else:
+    conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_meal_priority(meal_name):
     priority = {"조식": 1, "중식": 2, "석식": 3}
