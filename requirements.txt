@@ -4,3 +4,4 @@ pandas
 Pillow
 google-cloud-vision
 fpdf
+openpyxl
