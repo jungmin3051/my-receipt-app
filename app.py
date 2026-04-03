@@ -47,7 +47,7 @@ try:
 except:
     all_data = pd.DataFrame(columns=["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"])
 
-st.title("📑 법카 영수증 관리")
+st.title("📑 영수증 관리")
 
 # --- 1단계: 사진 업로드 ---
 with st.expander("📸 1단계: 사진 업로드", expanded=True):
