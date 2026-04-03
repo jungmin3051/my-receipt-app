@@ -7,7 +7,7 @@ import base64
 from PIL import Image, ImageOps
 from fpdf import FPDF
 
-# 0. 설정
+# 0. 기본 설정
 st.set_page_config(page_title="영수증 관리 마스터", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -25,6 +25,7 @@ def img_to_base64(image):
 
 def create_photo_pdf(df):
     pdf = FPDF()
+    # 날짜와 시간대 가중치로 정렬
     df['priority'] = df['시간대'].apply(get_meal_priority)
     df_sorted = df.sort_values(by=["날짜", "priority"], ascending=[True, True])
     for i, (_, row) in enumerate(df_sorted.iterrows()):
@@ -37,14 +38,23 @@ def create_photo_pdf(df):
         except: continue
     return bytes(pdf.output())
 
-st.title("📑 법카 영수증 관리 (한정민 선임)")
+# 1. 데이터 불러오기 (API 에러 방지를 위해 ttl 설정 강화)
+try:
+    # 데이터가 비어있을 경우를 대비해 기본 스키마 정의
+    default_df = pd.DataFrame(columns=["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"])
+    raw_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl="5m").astype(str) # 5분간 캐싱하여 API 호출 절약
+    
+    if raw_data.empty or "사진데이터" not in raw_data.columns:
+        all_data = default_df
+    else:
+        all_data = raw_data[raw_data["사진데이터"] != "nan"].fillna("")
+        all_data['priority'] = all_data['시간대'].apply(get_meal_priority)
+        all_data = all_data.sort_values(by=["날짜", "priority"], ascending=[True, True])
+except Exception as e:
+    st.error("데이터를 불러오는 중 API 오류가 발생했습니다. 잠시 후 새로고침(F5) 해주세요.")
+    all_data = default_df
 
-# 1. 데이터 불러오기 및 정렬
-raw_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
-all_data = raw_data[raw_data["사진데이터"] != "nan"].fillna("")
-if not all_data.empty:
-    all_data['priority'] = all_data['시간대'].apply(get_meal_priority)
-    all_data = all_data.sort_values(by=["날짜", "priority"], ascending=[True, True])
+st.title("📑 법카 영수증 관리 (한정민 선임)")
 
 # --- 1단계: 사진 업로드 ---
 with st.expander("📸 1단계: 사진 업로드 (시간 자동 감지)", expanded=True):
@@ -57,10 +67,11 @@ with st.expander("📸 1단계: 사진 업로드 (시간 자동 감지)", expand
         for f in files:
             img_b64 = img_to_base64(Image.open(f))
             new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": auto_meal, "금액": "0", "비고": "", "사진데이터": img_b64, "상태": "대기"})
+        
         updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
-        updated['priority'] = updated['시간대'].apply(get_meal_priority)
-        updated = updated.sort_values(by=["날짜", "priority"], ascending=[True, True]).drop(columns=['priority'], errors='ignore')
+        updated = updated.drop(columns=['priority'], errors='ignore')
         conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated)
+        st.cache_data.clear() # 업데이트 후 캐시 삭제
         st.rerun()
 
 # --- 2단계: 내역 수정 ---
@@ -72,7 +83,8 @@ if not all_data.empty:
     row = row_list[idx]
     
     c1, c2 = st.columns([1, 2])
-    with c1: st.image(base64.b64decode(row["사진데이터"]), width=300)
+    with c1: 
+        if row["사진데이터"]: st.image(base64.b64decode(row["사진데이터"]), width=300)
     with c2:
         f1, f2 = st.columns(2)
         with f1:
@@ -88,21 +100,21 @@ if not all_data.empty:
             f_price = f"{int(c_price):,}" if c_price.isdigit() else c_price
             u_price = st.text_input("금액", value=f_price)
         u_note = st.text_input("비고", row["비고"])
+        
         if st.button("💾 저장 및 자동 정렬"):
             row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": u_price.replace(',', ''), "비고": u_note, "상태": "완료"})
-            new_df = pd.DataFrame(row_list)
-            new_df['priority'] = new_df['시간대'].apply(get_meal_priority)
-            new_df = new_df.sort_values(by=["날짜", "priority"], ascending=[True, True]).drop(columns=['priority'], errors='ignore')
+            new_df = pd.DataFrame(row_list).drop(columns=['priority'], errors='ignore')
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df)
+            st.cache_data.clear()
             st.rerun()
 
-    # --- [NEW] 실시간 내역 확인창 ---
+    # --- [센스] 실시간 내역 확인창 ---
     st.divider()
     st.subheader("👀 현재 저장된 내역 (실시간)")
-    # 사진데이터와 정렬용 컬럼을 제외하고 깔끔하게 보여주기
-    display_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
-    display_df["금액"] = display_df["금액"].apply(lambda x: f"{int(float(x)):,}" if str(x).replace('.','').isdigit() else x)
-    st.dataframe(display_df, use_container_width=True)
+    if not all_data.empty:
+        display_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
+        display_df["금액"] = display_df["금액"].apply(lambda x: f"{int(float(x)):,}" if str(x).replace('.','').isdigit() else x)
+        st.dataframe(display_df, use_container_width=True)
 
     # --- 3단계: 다운로드 ---
     st.divider()
