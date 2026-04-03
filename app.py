@@ -12,10 +12,9 @@ st.set_page_config(page_title="영수증 관리 마스터", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 시간대 정렬을 위한 가중치 함수
 def get_meal_priority(meal_name):
     priority = {"조식": 1, "중식": 2, "석식": 3}
-    return priority.get(meal_name, 2) # 기본값은 중식(2)
+    return priority.get(meal_name, 2)
 
 def img_to_base64(image):
     image = ImageOps.exif_transpose(image)
@@ -26,10 +25,8 @@ def img_to_base64(image):
 
 def create_photo_pdf(df):
     pdf = FPDF()
-    # [중요] PDF 생성 전 날짜순 -> 시간대(조>중>석)순으로 정렬
     df['priority'] = df['시간대'].apply(get_meal_priority)
     df_sorted = df.sort_values(by=["날짜", "priority"], ascending=[True, True])
-    
     for i, (_, row) in enumerate(df_sorted.iterrows()):
         if i % 4 == 0: pdf.add_page()
         try:
@@ -45,7 +42,6 @@ st.title("📑 법카 영수증 관리 (한정민 선임)")
 # 1. 데이터 불러오기 및 정렬
 raw_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
 all_data = raw_data[raw_data["사진데이터"] != "nan"].fillna("")
-
 if not all_data.empty:
     all_data['priority'] = all_data['시간대'].apply(get_meal_priority)
     all_data = all_data.sort_values(by=["날짜", "priority"], ascending=[True, True])
@@ -56,25 +52,14 @@ with st.expander("📸 1단계: 사진 업로드 (시간 자동 감지)", expand
     if files and st.button("🚀 사진 전송"):
         new_list = []
         now = datetime.now()
-        
-        # [센스] 시간 읽기 기능: 10시 이전 조식, 16시 이전 중식, 이후 석식
-        current_hour = now.hour
-        if current_hour < 10: auto_meal = "조식"
-        elif current_hour < 16: auto_meal = "중식"
-        else: auto_meal = "석식"
-        
+        curr_h = now.hour
+        auto_meal = "조식" if curr_h < 10 else "중식" if curr_h < 16 else "석식"
         for f in files:
             img_b64 = img_to_base64(Image.open(f))
-            new_list.append({
-                "날짜": now.strftime('%y-%m-%d'), 
-                "식당명": "", 
-                "시간대": auto_meal, # 자동 감지된 시간대 적용
-                "금액": "0", "비고": "", "사진데이터": img_b64, "상태": "대기"
-            })
-        
+            new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": auto_meal, "금액": "0", "비고": "", "사진데이터": img_b64, "상태": "대기"})
         updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
         updated['priority'] = updated['시간대'].apply(get_meal_priority)
-        updated = updated.sort_values(by=["날짜", "priority"], ascending=[True, True]).drop(columns=['priority'])
+        updated = updated.sort_values(by=["날짜", "priority"], ascending=[True, True]).drop(columns=['priority'], errors='ignore')
         conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated)
         st.rerun()
 
@@ -96,39 +81,40 @@ if not all_data.empty:
             u_date = st.date_input("날짜", d_val)
             u_name = st.text_input("식당명", row["식당명"])
         with f2:
-            # [요청] 기본 선택은 '중식'으로 하되, 기존 데이터가 있으면 유지
-            meal_options = ["조식", "중식", "석식"]
-            current_meal = row["시간대"] if row["시간대"] in meal_options else "중식"
-            u_meal = st.selectbox("시간대", meal_options, index=meal_options.index(current_meal))
-            
-            clean_price = str(row["금액"]).split('.')[0].replace(',', '')
-            try: formatted_price = f"{int(clean_price):,}" if clean_price.isdigit() else clean_price
-            except: formatted_price = clean_price
-            u_price = st.text_input("금액", value=formatted_price)
-        
+            meal_opts = ["조식", "중식", "석식"]
+            curr_m = row["시간대"] if row["시간대"] in meal_opts else "중식"
+            u_meal = st.selectbox("시간대", meal_opts, index=meal_opts.index(curr_m))
+            c_price = str(row["금액"]).split('.')[0].replace(',', '')
+            f_price = f"{int(c_price):,}" if c_price.isdigit() else c_price
+            u_price = st.text_input("금액", value=f_price)
         u_note = st.text_input("비고", row["비고"])
-        
         if st.button("💾 저장 및 자동 정렬"):
-            save_price = u_price.replace(',', '')
-            row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": save_price, "비고": u_note, "상태": "완료"})
+            row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": u_price.replace(',', ''), "비고": u_note, "상태": "완료"})
             new_df = pd.DataFrame(row_list)
             new_df['priority'] = new_df['시간대'].apply(get_meal_priority)
-            new_df = new_df.sort_values(by=["날짜", "priority"], ascending=[True, True]).drop(columns=['priority'])
+            new_df = new_df.sort_values(by=["날짜", "priority"], ascending=[True, True]).drop(columns=['priority'], errors='ignore')
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df)
             st.rerun()
+
+    # --- [NEW] 실시간 내역 확인창 ---
+    st.divider()
+    st.subheader("👀 현재 저장된 내역 (실시간)")
+    # 사진데이터와 정렬용 컬럼을 제외하고 깔끔하게 보여주기
+    display_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
+    display_df["금액"] = display_df["금액"].apply(lambda x: f"{int(float(x)):,}" if str(x).replace('.','').isdigit() else x)
+    st.dataframe(display_df, use_container_width=True)
 
     # --- 3단계: 다운로드 ---
     st.divider()
     done_df = all_data[all_data["상태"] == "완료"]
     if not done_df.empty:
         st.subheader("📥 3단계: 결과물 다운로드")
-        col_ex, col_pdf = st.columns(2)
-        with col_ex:
-            excel_out = io.BytesIO()
-            report_df = done_df.copy()
-            report_df["금액"] = report_df["금액"].apply(lambda x: f"{int(float(x)):,}" if str(x).replace('.','').isdigit() else x)
-            report_df.drop(columns=["사진데이터", "상태", "priority"], errors='ignore').to_excel(excel_out, index=False)
-            st.download_button("📊 엑셀 내역서 다운로드", excel_out.getvalue(), "Receipt_List.xlsx")
-        with col_pdf:
-            pdf_bytes = create_photo_pdf(done_df)
-            st.download_button("📄 PDF 사진증빙 다운로드", pdf_bytes, "Receipt_Photos.pdf", "application/pdf")
+        d1, d2 = st.columns(2)
+        with d1:
+            ex_out = io.BytesIO()
+            rep_df = done_df.copy()
+            rep_df["금액"] = rep_df["금액"].apply(lambda x: f"{int(float(x)):,}" if str(x).replace('.','').isdigit() else x)
+            rep_df.drop(columns=["사진데이터", "상태", "priority"], errors='ignore').to_excel(ex_out, index=False)
+            st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
+        with d2:
+            st.download_button("📄 PDF 다운로드", create_photo_pdf(done_df), "Receipt_Photos.pdf", "application/pdf")
