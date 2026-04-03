@@ -57,7 +57,7 @@ except Exception as e:
 st.title("📑 법카 영수증 관리 (한정민 선임)")
 
 # --- 1단계: 사진 업로드 ---
-with st.expander("📸 1단계: 사진 업로드 (시간 자동 감지)", expanded=True):
+with st.expander("📸 1단계: 사진 업로드", expanded=True):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files and st.button("🚀 사진 전송"):
         new_list = []
