@@ -11,15 +11,17 @@ from google.cloud import vision
 from google.oauth2 import service_account
 
 # 0. 기본 설정
-st.set_page_config(page_title="법카 영수증 관리", layout="wide")
+st.set_page_config(page_title="법카 영수증 관리 (AI)", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
-conn = st.connection("gsheets", type=GSheetsConnection, **st.secrets["google_cloud_key"])
+
+# [수정] 권한 오류 해결을 위해 secrets 정보를 직접 주입합니다.
+conn = st.connection("gsheets", type=GSheetsConnection, **st.secrets["connections"]["gsheets"])
 
 # [OCR] Google Vision API 설정
 def analyze_receipt(image_bytes):
     try:
-        # Secrets에서 열쇠 꺼내기
-        key_dict = json.loads(st.secrets["google_cloud_key"])
+        # Secrets에서 AI용 열쇠 꺼내기
+        key_dict = st.secrets["google_cloud_key"]
         creds = service_account.Credentials.from_service_account_info(key_dict)
         client = vision.ImageAnnotatorClient(credentials=creds)
         
@@ -32,15 +34,15 @@ def analyze_receipt(image_bytes):
         full_text = texts[0].description
         lines = full_text.split('\n')
         
-        # 1. 식당명: 보통 첫 번째 줄에 상호명이 있음 (다이소, 오렌지푸드 등)
+        # 1. 식당명: 첫 번째 줄 추출 (다이소, 오렌지푸드 등)
         res_name = lines[0].strip() if lines else "알 수 없음"
         
-        # 2. 금액: 숫자와 콤마 조합 중 가장 큰 값을 찾거나 '원' 앞의 숫자 추출
+        # 2. 금액 추출 로직
         price = "0"
         for line in lines:
             if '원' in line or ',' in line:
                 clean_p = ''.join(filter(str.isdigit, line))
-                if clean_p and int(clean_p) > 100: # 최소 금액 필터링
+                if clean_p and int(clean_p) > 100:
                     price = f"{int(clean_p):,}"
                     break
         return res_name, price
@@ -59,6 +61,20 @@ def img_to_base64(image):
     image.save(buffered, format="JPEG", quality=50) 
     return base64.b64encode(buffered.getvalue()).decode(), buffered.getvalue()
 
+# PDF 생성 함수 (누락 방지)
+def create_photo_pdf(df):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    for _, row in df.iterrows():
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, f"{row['날짜']} - {row['식당명']} ({row['금액']} won)", ln=True)
+        if row["사진데이터"]:
+            img_data = base64.b64decode(row["사진데이터"])
+            img_path = io.BytesIO(img_data)
+            pdf.image(img_path, x=10, y=30, w=180)
+    return pdf.output(dest='S')
+
 # 1. 데이터 불러오기
 try:
     raw_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl="1s").astype(str)
@@ -66,7 +82,7 @@ try:
 except:
     all_data = pd.DataFrame(columns=["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"])
 
-st.title("📑 법카 영수증 관리 (AI)")
+st.title("📑 법카 영수증 관리 (AI 모드)")
 
 # --- 1단계: 사진 업로드 및 AI 자동 인식 ---
 with st.expander("📸 1단계: 사진 업로드", expanded=True):
@@ -79,14 +95,13 @@ with st.expander("📸 1단계: 사진 업로드", expanded=True):
         with st.spinner("AI가 영수증 글자를 읽고 있습니다..."):
             for f in files:
                 img_b64, img_bytes = img_to_base64(Image.open(f))
-                # [핵심] 여기서 AI가 식당명이랑 금액을 알아냅니다!
                 ai_res, ai_price = analyze_receipt(img_bytes)
                 
                 new_list.append({
                     "날짜": now.strftime('%y-%m-%d'), 
-                    "식당명": ai_res, # AI가 찾은 이름 자동 입력
+                    "식당명": ai_res, 
                     "시간대": auto_meal, 
-                    "금액": ai_price, # AI가 찾은 금액 자동 입력 (콤마 포함)
+                    "금액": ai_price, 
                     "비고": "AI 자동인식", 
                     "사진데이터": img_b64, "상태": "대기"
                 })
@@ -97,11 +112,9 @@ with st.expander("📸 1단계: 사진 업로드", expanded=True):
             st.cache_data.clear()
             st.rerun()
 
-# --- 2단계 & 3단계는 이전과 동일 (생략 없이 선임님 코드에 덮어쓰기 하시면 됩니다) ---
-
 # --- 2단계: 내용 수정 및 삭제 ---
-st.divider()
 if not all_data.empty:
+    st.divider()
     st.subheader("💻 2단계: 내용 수정 및 삭제")
     all_data['priority'] = all_data['시간대'].apply(get_meal_priority)
     sorted_data = all_data.sort_values(by=["날짜", "priority"], ascending=[True, True])
@@ -125,7 +138,6 @@ if not all_data.empty:
             meal_opts = ["조식", "중식", "석식"]
             curr_m = row["시간대"] if row["시간대"] in meal_opts else "중식"
             u_meal = st.selectbox("시간대", meal_opts, index=meal_opts.index(curr_m))
-            # 금액 표시 처리 (콤마 유지)
             p_val = str(row["금액"]).replace(',', '').split('.')[0]
             d_price = f"{int(p_val):,}" if p_val.isdigit() else p_val
             u_price = st.text_input("금액", value=d_price)
@@ -134,7 +146,6 @@ if not all_data.empty:
         b_c1, b_c2 = st.columns(2)
         with b_c1:
             if st.button("💾 저장 및 수정", use_container_width=True):
-                # 저장할 때 콤마를 붙여서 저장
                 clean_p = u_price.replace(',', '')
                 final_p = f"{int(clean_p):,}" if clean_p.isdigit() else u_price
                 row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": final_p, "비고": u_note, "상태": "완료"})
@@ -150,23 +161,21 @@ if not all_data.empty:
                 st.cache_data.clear()
                 st.rerun()
 
-# --- 실시간 내역 확인 및 다운로드 ---
+# --- 3단계: 확인 및 다운로드 ---
 if not all_data.empty:
     st.divider()
     st.subheader("👀 현재 저장된 내역")
-    # 화면에 보여줄 때도 콤마 적용
     disp_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
     st.dataframe(disp_df, use_container_width=True)
 
-st.divider()
-done_df = all_data[all_data["상태"] == "완료"] if not all_data.empty else pd.DataFrame()
-if not done_df.empty:
-    st.subheader("📥 3단계: 다운로드")
-    d1, d2 = st.columns(2)
-    with d1:
-        ex_out = io.BytesIO()
-        done_df.drop(columns=["사진데이터", "상태", "priority"], errors='ignore').to_excel(ex_out, index=False)
-        st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
-    with d2:
-        pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
-        st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf")
+    done_df = all_data[all_data["상태"] == "완료"]
+    if not done_df.empty:
+        st.subheader("📥 3단계: 다운로드")
+        d1, d2 = st.columns(2)
+        with d1:
+            ex_out = io.BytesIO()
+            done_df.drop(columns=["사진데이터", "상태", "priority"], errors='ignore').to_excel(ex_out, index=False)
+            st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
+        with d2:
+            pdf_fn = f"{datetime.now().month}월 영수증보고서_한정민.pdf"
+            st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf")
