@@ -78,7 +78,7 @@ with st.expander("📸 1단계: 사진 업로드", expanded=True):
             st.cache_data.clear()
             st.rerun()
 
-# --- 2단계: 내용 수정 ---
+# --- 2단계: 개별 내용 수정 ---
 st.divider()
 if not all_data.empty:
     st.subheader("💻 2단계: 개별 내용 수정")
@@ -107,38 +107,31 @@ if not all_data.empty:
             st.cache_data.clear()
             st.rerun()
 
-# --- 3단계: 내역 확인 및 선택 삭제 ---
+# --- 3단계: 내역 확인 및 선택 삭제 (구버전 호환 방식) ---
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 선택 삭제")
-    st.info("왼쪽 체크박스를 선택하여 여러 항목을 한 번에 삭제할 수 있습니다.")
     
-    # 표시용 데이터 (인덱스 1부터)
-    disp_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
-    disp_df["금액"] = disp_df["금액"].apply(format_price)
+    # 1. 삭제할 항목 선택박스 (멀티 셀렉트)
+    delete_options = [f"[{i+1}] {r['날짜']} | {r['식당명']} ({r['시간대']})" for i, r in enumerate(row_list)]
+    selected_to_delete = st.multiselect("🗑️ 삭제할 항목을 선택하세요 (여러 개 가능)", delete_options)
     
-    # 선택 기능을 포함한 데이터프레임
-    event = st.dataframe(
-        disp_df,
-        use_container_width=True,
-        on_select="rerun",
-        selection_mode="multi_rows",
-        hide_index=False
-    )
-    
-    selected_rows = event.selection.rows
-    if selected_rows:
-        if st.button(f"🗑️ 선택한 {len(selected_rows)}개 항목 삭제", type="primary", use_container_width=True):
-            # 선택된 인덱스를 제외하고 나머지 데이터만 유지
-            remaining_df = all_data.drop(all_data.index[selected_rows])
-            if remaining_df.empty:
-                save_df = pd.DataFrame(columns=COLUMNS)
-            else:
-                save_df = remaining_df[COLUMNS]
+    if selected_to_delete:
+        if st.button(f"선택한 {len(selected_to_delete)}개 항목 일괄 삭제", type="primary", use_container_width=True):
+            # 선택된 텍스트에서 인덱스 번호 추출하여 삭제
+            indices_to_delete = [int(s.split(']')[0][1:]) - 1 for s in selected_to_delete]
+            remaining_df = all_data.drop(all_data.index[indices_to_delete])
             
+            save_df = remaining_df[COLUMNS] if not remaining_df.empty else pd.DataFrame(columns=COLUMNS)
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=save_df)
             st.cache_data.clear()
             st.rerun()
+    
+    # 2. 단순 내역 표시용 표
+    disp_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
+    disp_df.index = disp_df.index + 1
+    disp_df["금액"] = disp_df["금액"].apply(format_price)
+    st.dataframe(disp_df, use_container_width=True)
 
 # --- 4단계: 다운로드 ---
 st.divider()
