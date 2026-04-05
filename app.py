@@ -26,8 +26,10 @@ def img_to_base64(image):
 
 def create_photo_pdf(df):
     pdf = FPDF()
-    df['priority'] = df['시간대'].apply(get_meal_priority)
-    df_sorted = df.sort_values(by=["날짜", "priority"], ascending=[True, True])
+    temp_df = df.copy()
+    temp_df['priority'] = temp_df['시간대'].apply(get_meal_priority)
+    df_sorted = temp_df.sort_values(by=["날짜", "priority"], ascending=[True, True])
+    
     for i, (_, row) in enumerate(df_sorted.iterrows()):
         if i % 4 == 0: pdf.add_page()
         try:
@@ -53,7 +55,8 @@ with st.expander("📸 1단계: 사진 업로드", expanded=True):
     if files and st.button("🚀 사진 전송"):
         new_list = []
         now = datetime.now()
-        auto_meal = "조식" if now.hour < 10 else "중식" if now.hour < 16 else "석식"
+        # [수정] 업로드 시간 상관없이 무조건 '중식'으로 설정
+        auto_meal = "중식" 
         with st.spinner("이미지 최적화 중..."):
             for f in files:
                 try:
@@ -70,6 +73,7 @@ with st.expander("📸 1단계: 사진 업로드", expanded=True):
 st.divider()
 if not all_data.empty:
     st.subheader("💻 2단계: 내용 수정 및 삭제")
+    
     all_data['priority'] = all_data['시간대'].apply(get_meal_priority)
     sorted_data = all_data.sort_values(by=["날짜", "priority"], ascending=[True, True])
     row_list = sorted_data.to_dict('records')
@@ -90,21 +94,31 @@ if not all_data.empty:
             u_name = st.text_input("식당명", row["식당명"])
         with f2:
             meal_opts = ["조식", "중식", "석식"]
+            # [수정] 기본 선택값을 무조건 '중식'으로 유도
             curr_m = row["시간대"] if row["시간대"] in meal_opts else "중식"
             u_meal = st.selectbox("시간대", meal_opts, index=meal_opts.index(curr_m))
-            # 금액 표시 처리 (콤마 유지)
-            p_val = str(row["금액"]).replace(',', '').split('.')[0]
-            d_price = f"{int(p_val):,}" if p_val.isdigit() else p_val
+            
+            # [금액 포맷팅] .0 제거 및 콤마 추가
+            raw_p = str(row["금액"]).replace(',', '').split('.')[0]
+            d_price = f"{int(raw_p):,}" if raw_p.isdigit() else "0"
             u_price = st.text_input("금액", value=d_price)
+            
         u_note = st.text_input("비고", row["비고"])
         
         b_c1, b_c2 = st.columns(2)
         with b_c1:
             if st.button("💾 저장 및 수정", use_container_width=True):
-                # 저장할 때 콤마를 붙여서 저장
                 clean_p = u_price.replace(',', '')
                 final_p = f"{int(clean_p):,}" if clean_p.isdigit() else u_price
-                row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": final_p, "비고": u_note, "상태": "완료"})
+                
+                row_list[idx].update({
+                    "날짜": u_date.strftime('%y-%m-%d'), 
+                    "식당명": u_name, 
+                    "시간대": u_meal, 
+                    "금액": final_p, 
+                    "비고": u_note, 
+                    "상태": "완료"
+                })
                 new_df = pd.DataFrame(row_list).drop(columns=['priority'], errors='ignore')
                 conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df)
                 st.cache_data.clear()
@@ -121,7 +135,6 @@ if not all_data.empty:
 if not all_data.empty:
     st.divider()
     st.subheader("👀 현재 저장된 내역")
-    # 화면에 보여줄 때도 콤마 적용
     disp_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
     st.dataframe(disp_df, use_container_width=True)
 
