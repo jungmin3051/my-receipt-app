@@ -107,31 +107,39 @@ if not all_data.empty:
             st.cache_data.clear()
             st.rerun()
 
-# --- 3단계: 내역 확인 및 선택 삭제 (구버전 호환 방식) ---
+# --- 3단계: 내역 확인 및 체크 삭제 ---
 if not all_data.empty:
     st.divider()
-    st.subheader("👀 3단계: 내역 확인 및 선택 삭제")
+    st.subheader("👀 3단계: 내역 확인 및 체크 삭제")
+    st.info("지울 항목의 '삭제체크' 칸을 체크한 뒤 하단 버튼을 눌러주세요.")
     
-    # 1. 삭제할 항목 선택박스 (멀티 셀렉트)
-    delete_options = [f"[{i+1}] {r['날짜']} | {r['식당명']} ({r['시간대']})" for i, r in enumerate(row_list)]
-    selected_to_delete = st.multiselect("🗑️ 삭제할 항목을 선택하세요 (여러 개 가능)", delete_options)
+    # 표시용 데이터 가공 (사진데이터 제외, 삭제체크 열 추가)
+    edit_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
+    edit_df.insert(0, "삭제체크", False) # 맨 앞에 체크박스 열 추가
+    edit_df.index = edit_df.index + 1
     
-    if selected_to_delete:
-        if st.button(f"선택한 {len(selected_to_delete)}개 항목 일괄 삭제", type="primary", use_container_width=True):
-            # 선택된 텍스트에서 인덱스 번호 추출하여 삭제
-            indices_to_delete = [int(s.split(']')[0][1:]) - 1 for s in selected_to_delete]
-            remaining_df = all_data.drop(all_data.index[indices_to_delete])
-            
+    # 시트 형태의 데이터 에디터 출력
+    edited_data = st.data_editor(
+        edit_df,
+        use_container_width=True,
+        column_config={
+            "삭제체크": st.column_config.CheckboxColumn(help="삭제할 항목 체크", default=False)
+        },
+        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"] # 체크박스만 수정 가능하게 설정
+    )
+    
+    # 체크된 인덱스 찾기
+    checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
+    # 인덱스가 1부터 시작하게 했으므로 다시 0-based로 보정
+    real_indices = [i-1 for i in checked_indices]
+    
+    if real_indices:
+        if st.button(f"🗑️ 체크한 {len(real_indices)}개 항목 일괄 삭제", type="primary", use_container_width=True):
+            remaining_df = all_data.drop(all_data.index[real_indices])
             save_df = remaining_df[COLUMNS] if not remaining_df.empty else pd.DataFrame(columns=COLUMNS)
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=save_df)
             st.cache_data.clear()
             st.rerun()
-    
-    # 2. 단순 내역 표시용 표
-    disp_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
-    disp_df.index = disp_df.index + 1
-    disp_df["금액"] = disp_df["금액"].apply(format_price)
-    st.dataframe(disp_df, use_container_width=True)
 
 # --- 4단계: 다운로드 ---
 st.divider()
