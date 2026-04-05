@@ -19,11 +19,9 @@ def get_meal_priority(meal_name):
 def format_price(val):
     try:
         clean_val = str(val).replace(',', '').split('.')[0]
-        if clean_val.isdigit():
-            return f"{int(clean_val):,}"
+        if clean_val.isdigit(): return f"{int(clean_val):,}"
         return val
-    except:
-        return val
+    except: return val
 
 def img_to_base64(image):
     image = ImageOps.exif_transpose(image)
@@ -36,7 +34,6 @@ def img_to_base64(image):
 def create_photo_pdf(df):
     pdf = FPDF()
     temp_df = df.copy()
-    # PDF도 완료 우선, 날짜순 정렬
     temp_df['priority'] = temp_df['시간대'].apply(get_meal_priority)
     df_sorted = temp_df.sort_values(by=["상태", "날짜", "priority"], ascending=[False, True, True])
     for i, (_, row) in enumerate(df_sorted.iterrows()):
@@ -49,16 +46,13 @@ def create_photo_pdf(df):
         except: continue
     return bytes(pdf.output())
 
-# 1. 데이터 불러오기 및 정렬 로직 보강
+# 1. 데이터 불러오기
 COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
 try:
-    raw_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
-    all_data = raw_data[raw_data["사진데이터"] != "nan"].fillna("")
-    
+    all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
+    all_data = all_data[all_data["사진데이터"] != "nan"].fillna("")
     if not all_data.empty:
-        # 날짜 형식 통일 (2026-04-05 -> 26-04-05)
         all_data['날짜'] = all_data['날짜'].apply(lambda x: x[-8:] if len(x) > 8 else x)
-        # 정렬: 상태(완료가 위로), 날짜(오름차순), 시간대순
         all_data['priority'] = all_data['시간대'].apply(get_meal_priority)
         all_data = all_data.sort_values(by=["상태", "날짜", "priority"], ascending=[False, True, True]).reset_index(drop=True)
 except:
@@ -72,38 +66,25 @@ with st.expander("📸 1단계: 사진 업로드", expanded=True):
     if files and st.button("🚀 사진 전송"):
         new_list = []
         now = datetime.now()
-        auto_meal = "중식" 
         with st.spinner("이미지 최적화 중..."):
             for f in files:
                 try:
                     img_b64 = img_to_base64(Image.open(f))
-                    new_list.append({
-                        "날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": auto_meal, 
-                        "금액": "0", "비고": "", "사진데이터": img_b64, "상태": "대기"
-                    })
+                    new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", "금액": "0", "비고": "", "사진데이터": img_b64, "상태": "대기"})
                 except Exception as e: st.error(f"오류: {e}")
         if new_list:
             updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
-            # 저장 전 정렬
-            updated['priority'] = updated['시간대'].apply(get_meal_priority)
-            updated = updated.sort_values(by=["상태", "날짜", "priority"], ascending=[False, True, True])
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
             st.cache_data.clear()
             st.rerun()
 
-# --- 2단계: 내용 수정 및 삭제 ---
+# --- 2단계: 내용 수정 ---
 st.divider()
 if not all_data.empty:
-    st.subheader("💻 2단계: 내용 수정 및 삭제")
+    st.subheader("💻 2단계: 개별 내용 수정")
     row_list = all_data.to_dict('records')
-    
-    # [수정] 항목 선택 창: 1부터 시작 / 날짜 | 식당명 - 상태
-    idx = st.selectbox(
-        "항목 선택", range(len(row_list)), 
-        format_func=lambda x: f"[{x+1}] {row_list[x]['날짜']} | {row_list[x]['식당명'] if row_list[x]['식당명'] else '미입력'} - {row_list[x]['상태']}"
-    )
+    idx = st.selectbox("항목 선택", range(len(row_list)), format_func=lambda x: f"[{x+1}] {row_list[x]['날짜']} | {row_list[x]['식당명'] if row_list[x]['식당명'] else '미입력'} - {row_list[x]['상태']}")
     row = row_list[idx]
-    
     c1, c2 = st.columns([1, 2])
     with c1: 
         if row["사진데이터"]: st.image(base64.b64decode(row["사진데이터"]), width=300)
@@ -116,51 +97,54 @@ if not all_data.empty:
             u_name = st.text_input("식당명", row["식당명"])
         with f2:
             meal_opts = ["조식", "중식", "석식"]
-            curr_m = row["시간대"] if row["시간대"] in meal_opts else "중식"
-            u_meal = st.selectbox("시간대", meal_opts, index=meal_opts.index(curr_m))
+            u_meal = st.selectbox("시간대", meal_opts, index=meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             u_price = st.text_input("금액", value=format_price(row["금액"]))
         u_note = st.text_input("비고", row["비고"])
-        
-        b_c1, b_c2 = st.columns(2)
-        with b_c1:
-            if st.button("💾 저장 및 수정", use_container_width=True):
-                row_list[idx].update({
-                    "날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, 
-                    "시간대": u_meal, "금액": format_price(u_price), "비고": u_note, "상태": "완료"
-                })
-                new_df = pd.DataFrame(row_list)
-                new_df['priority'] = new_df['시간대'].apply(get_meal_priority)
-                new_df = new_df.sort_values(by=["상태", "날짜", "priority"], ascending=[False, True, True])
-                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df[COLUMNS])
-                st.cache_data.clear()
-                st.rerun()
-        with b_c2:
-            if st.button("🗑️ 삭제", use_container_width=True):
-                row_list.pop(idx)
-                save_df = pd.DataFrame(row_list) if row_list else pd.DataFrame(columns=COLUMNS)
-                if not save_df.empty:
-                    save_df['priority'] = save_df['시간대'].apply(get_meal_priority)
-                    save_df = save_df.sort_values(by=["상태", "날짜", "priority"], ascending=[False, True, True])
-                    save_df = save_df[COLUMNS]
-                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=save_df)
-                st.cache_data.clear()
-                st.rerun()
+        if st.button("💾 이 항목 저장", use_container_width=True):
+            row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": format_price(u_price), "비고": u_note, "상태": "완료"})
+            new_df = pd.DataFrame(row_list)
+            conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df[COLUMNS])
+            st.cache_data.clear()
+            st.rerun()
 
-# --- 실시간 내역 확인 및 다운로드 ---
+# --- 3단계: 내역 확인 및 선택 삭제 ---
 if not all_data.empty:
     st.divider()
-    st.subheader("👀 현재 저장된 내역")
-    # [수정] 사진데이터 제외하고 표시, 인덱스 1부터 시작
+    st.subheader("👀 3단계: 내역 확인 및 선택 삭제")
+    st.info("왼쪽 체크박스를 선택하여 여러 항목을 한 번에 삭제할 수 있습니다.")
+    
+    # 표시용 데이터 (인덱스 1부터)
     disp_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
-    disp_df.index = disp_df.index + 1
     disp_df["금액"] = disp_df["금액"].apply(format_price)
     
-    st.dataframe(disp_df, use_container_width=True)
+    # 선택 기능을 포함한 데이터프레임
+    event = st.dataframe(
+        disp_df,
+        use_container_width=True,
+        on_select="rerun",
+        selection_mode="multi_rows",
+        hide_index=False
+    )
+    
+    selected_rows = event.selection.rows
+    if selected_rows:
+        if st.button(f"🗑️ 선택한 {len(selected_rows)}개 항목 삭제", type="primary", use_container_width=True):
+            # 선택된 인덱스를 제외하고 나머지 데이터만 유지
+            remaining_df = all_data.drop(all_data.index[selected_rows])
+            if remaining_df.empty:
+                save_df = pd.DataFrame(columns=COLUMNS)
+            else:
+                save_df = remaining_df[COLUMNS]
+            
+            conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=save_df)
+            st.cache_data.clear()
+            st.rerun()
 
+# --- 4단계: 다운로드 ---
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"] if not all_data.empty else pd.DataFrame()
 if not done_df.empty:
-    st.subheader("📥 3단계: 다운로드")
+    st.subheader("📥 4단계: 다운로드")
     d1, d2 = st.columns(2)
     with d1:
         ex_out = io.BytesIO()
