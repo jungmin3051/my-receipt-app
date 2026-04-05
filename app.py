@@ -111,26 +111,23 @@ if not all_data.empty:
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 체크 삭제")
-    st.info("지울 항목의 '삭제체크' 칸을 체크한 뒤 하단 버튼을 눌러주세요.")
     
-    # 표시용 데이터 가공 (사진데이터 제외, 삭제체크 열 추가)
+    # 표시용 데이터 가공 (사진데이터 제외)
     edit_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
-    edit_df.insert(0, "삭제체크", False) # 맨 앞에 체크박스 열 추가
+    # [수정] 삭제체크 열을 가장 뒤(마지막 컬럼)에 추가
+    edit_df["삭제체크"] = False
     edit_df.index = edit_df.index + 1
     
-    # 시트 형태의 데이터 에디터 출력
     edited_data = st.data_editor(
         edit_df,
         use_container_width=True,
         column_config={
-            "삭제체크": st.column_config.CheckboxColumn(help="삭제할 항목 체크", default=False)
+            "삭제체크": st.column_config.CheckboxColumn(label="삭제체크", help="삭제할 항목 체크", default=False)
         },
-        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"] # 체크박스만 수정 가능하게 설정
+        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"]
     )
     
-    # 체크된 인덱스 찾기
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
-    # 인덱스가 1부터 시작하게 했으므로 다시 0-based로 보정
     real_indices = [i-1 for i in checked_indices]
     
     if real_indices:
