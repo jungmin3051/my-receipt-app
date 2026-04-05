@@ -16,12 +16,17 @@ def get_meal_priority(meal_name):
     priority = {"조식": 1, "중식": 2, "석식": 3}
     return priority.get(meal_name, 2)
 
+# [수정] 소수점 .0을 완전히 제거하고 3자리마다 콤마를 찍는 함수
 def format_price(val):
     try:
-        clean_val = str(val).replace(',', '').split('.')[0]
-        if clean_val.isdigit(): return f"{int(clean_val):,}"
+        if not val or str(val).lower() == 'nan': return "0"
+        # 소수점이나 콤마 제거 후 숫자만 추출
+        clean_val = str(val).split('.')[0].replace(',', '')
+        if clean_val.isdigit():
+            return f"{int(clean_val):,}"
         return val
-    except: return val
+    except:
+        return val
 
 def img_to_base64(image):
     image = ImageOps.exif_transpose(image)
@@ -53,6 +58,8 @@ try:
     all_data = all_data[all_data["사진데이터"] != "nan"].fillna("")
     if not all_data.empty:
         all_data['날짜'] = all_data['날짜'].apply(lambda x: x[-8:] if len(x) > 8 else x)
+        # 불러올 때도 금액 형식 정리
+        all_data['금액'] = all_data['금액'].apply(format_price)
         all_data['priority'] = all_data['시간대'].apply(get_meal_priority)
         all_data = all_data.sort_values(by=["상태", "날짜", "priority"], ascending=[False, True, True]).reset_index(drop=True)
 except:
@@ -98,6 +105,7 @@ if not all_data.empty:
         with f2:
             meal_opts = ["조식", "중식", "석식"]
             u_meal = st.selectbox("시간대", meal_opts, index=meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
+            # 입력 시에도 포맷 적용
             u_price = st.text_input("금액", value=format_price(row["금액"]))
         u_note = st.text_input("비고", row["비고"])
         if st.button("💾 이 항목 저장", use_container_width=True):
@@ -112,9 +120,7 @@ if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 체크 삭제")
     
-    # 표시용 데이터 가공 (사진데이터 제외)
     edit_df = all_data.drop(columns=["사진데이터", "priority"], errors='ignore').copy()
-    # [수정] 삭제체크 열을 가장 뒤(마지막 컬럼)에 추가
     edit_df["삭제체크"] = False
     edit_df.index = edit_df.index + 1
     
@@ -122,7 +128,8 @@ if not all_data.empty:
         edit_df,
         use_container_width=True,
         column_config={
-            "삭제체크": st.column_config.CheckboxColumn(label="삭제체크", help="삭제할 항목 체크", default=False)
+            "삭제체크": st.column_config.CheckboxColumn(label="삭제체크", default=False),
+            "금액": st.column_config.TextColumn("금액") # 숫자로 인식해서 .0 붙는 걸 방지하기 위해 텍스트로 고정
         },
         disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"]
     )
