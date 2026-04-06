@@ -16,11 +16,10 @@ def get_meal_priority(meal_name):
     priority = {"조식": 1, "중식": 2, "석식": 3}
     return priority.get(meal_name, 2)
 
-# [수정] 소수점 .0을 완전히 제거하고 3자리마다 콤마를 찍는 함수
+# 금액 포맷 함수: 소수점 .0 제거 및 3자리 콤마
 def format_price(val):
     try:
         if not val or str(val).lower() == 'nan': return "0"
-        # 소수점이나 콤마 제거 후 숫자만 추출
         clean_val = str(val).split('.')[0].replace(',', '')
         if clean_val.isdigit():
             return f"{int(clean_val):,}"
@@ -58,9 +57,9 @@ try:
     all_data = all_data[all_data["사진데이터"] != "nan"].fillna("")
     if not all_data.empty:
         all_data['날짜'] = all_data['날짜'].apply(lambda x: x[-8:] if len(x) > 8 else x)
-        # 불러올 때도 금액 형식 정리
         all_data['금액'] = all_data['금액'].apply(format_price)
         all_data['priority'] = all_data['시간대'].apply(get_meal_priority)
+        # 정렬: 완료 우선, 그다음 날짜순
         all_data = all_data.sort_values(by=["상태", "날짜", "priority"], ascending=[False, True, True]).reset_index(drop=True)
 except:
     all_data = pd.DataFrame(columns=COLUMNS)
@@ -90,8 +89,30 @@ st.divider()
 if not all_data.empty:
     st.subheader("💻 2단계: 개별 내용 수정")
     row_list = all_data.to_dict('records')
-    idx = st.selectbox("항목 선택", range(len(row_list)), format_func=lambda x: f"[{x+1}] {row_list[x]['날짜']} | {row_list[x]['식당명'] if row_list[x]['식당명'] else '미입력'} - {row_list[x]['상태']}")
+    
+    # [수정] 대기 상태인 항목 중 가장 첫 번째(가장 빠른 번호) 인덱스 찾기
+    default_idx = 0
+    for i, r in enumerate(row_list):
+        if r["상태"] == "대기":
+            default_idx = i
+            break
+
+    # 세션 상태를 이용해 선택 인덱스 유지 (자동 넘어가기 기능)
+    if "selected_index" not in st.session_state:
+        st.session_state.selected_index = default_idx
+    
+    # 항목 선택창
+    idx = st.selectbox(
+        "항목 선택", 
+        range(len(row_list)), 
+        index=st.session_state.selected_index,
+        format_func=lambda x: f"[{x+1}] {row_list[x]['날짜']} | {row_list[x]['식당명'] if row_list[x]['식당명'] else '미입력'} - {row_list[x]['상태']}"
+    )
+    
+    # 사용자가 직접 바꿨을 때 세션 업데이트
+    st.session_state.selected_index = idx
     row = row_list[idx]
+    
     c1, c2 = st.columns([1, 2])
     with c1: 
         if row["사진데이터"]: st.image(base64.b64decode(row["사진데이터"]), width=300)
@@ -104,14 +125,24 @@ if not all_data.empty:
             u_name = st.text_input("식당명", row["식당명"])
         with f2:
             meal_opts = ["조식", "중식", "석식"]
-            u_meal = st.selectbox("시간대", meal_opts, index=meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
-            # 입력 시에도 포맷 적용
+            curr_meal = row["시간대"] if row["시간대"] in meal_opts else "중식"
+            u_meal = st.selectbox("시간대", meal_opts, index=meal_opts.index(curr_meal))
             u_price = st.text_input("금액", value=format_price(row["금액"]))
         u_note = st.text_input("비고", row["비고"])
+        
         if st.button("💾 이 항목 저장", use_container_width=True):
             row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": format_price(u_price), "비고": u_note, "상태": "완료"})
             new_df = pd.DataFrame(row_list)
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df[COLUMNS])
+            
+            # [핵심] 저장 후 다음 '대기' 항목 인덱스 미리 계산해서 세션에 넣기
+            next_idx = 0
+            for i, r in enumerate(row_list):
+                if r["상태"] == "대기":
+                    next_idx = i
+                    break
+            st.session_state.selected_index = next_idx
+            
             st.cache_data.clear()
             st.rerun()
 
@@ -129,7 +160,7 @@ if not all_data.empty:
         use_container_width=True,
         column_config={
             "삭제체크": st.column_config.CheckboxColumn(label="삭제체크", default=False),
-            "금액": st.column_config.TextColumn("금액") # 숫자로 인식해서 .0 붙는 걸 방지하기 위해 텍스트로 고정
+            "금액": st.column_config.TextColumn("금액")
         },
         disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"]
     )
@@ -142,6 +173,9 @@ if not all_data.empty:
             remaining_df = all_data.drop(all_data.index[real_indices])
             save_df = remaining_df[COLUMNS] if not remaining_df.empty else pd.DataFrame(columns=COLUMNS)
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=save_df)
+            
+            # 삭제 후에도 다시 첫 번째 대기 항목 잡기
+            st.session_state.selected_index = 0 
             st.cache_data.clear()
             st.rerun()
 
