@@ -16,16 +16,15 @@ def get_meal_priority(meal_name):
     priority = {"조식": 1, "중식": 2, "석식": 3}
     return priority.get(meal_name, 2)
 
-# 금액 포맷 함수: 소수점 .0 제거 및 3자리 콤마
 def format_price(val):
     try:
-        if not val or str(val).lower() == 'nan': return "0"
+        if not val or str(val).lower() in ['nan', '0', '']: return ""
         clean_val = str(val).split('.')[0].replace(',', '')
         if clean_val.isdigit():
             return f"{int(clean_val):,}"
         return val
     except:
-        return val
+        return ""
 
 def img_to_base64(image):
     image = ImageOps.exif_transpose(image)
@@ -56,10 +55,8 @@ try:
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
     all_data = all_data[all_data["사진데이터"] != "nan"].fillna("")
     if not all_data.empty:
-        all_data['날짜'] = all_data['날짜'].apply(lambda x: x[-8:] if len(x) > 8 else x)
         all_data['금액'] = all_data['금액'].apply(format_price)
         all_data['priority'] = all_data['시간대'].apply(get_meal_priority)
-        # 정렬: 완료 우선, 그다음 날짜순
         all_data = all_data.sort_values(by=["상태", "날짜", "priority"], ascending=[False, True, True]).reset_index(drop=True)
 except:
     all_data = pd.DataFrame(columns=COLUMNS)
@@ -76,7 +73,8 @@ with st.expander("📸 1단계: 사진 업로드", expanded=True):
             for f in files:
                 try:
                     img_b64 = img_to_base64(Image.open(f))
-                    new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", "금액": "0", "비고": "", "사진데이터": img_b64, "상태": "대기"})
+                    # 업로드 시 기본 날짜를 촬영일(현재일)로 저장
+                    new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", "금액": "", "비고": "", "사진데이터": img_b64, "상태": "대기"})
                 except Exception as e: st.error(f"오류: {e}")
         if new_list:
             updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
@@ -90,26 +88,23 @@ if not all_data.empty:
     st.subheader("💻 2단계: 개별 내용 수정")
     row_list = all_data.to_dict('records')
     
-    # [수정] 대기 상태인 항목 중 가장 첫 번째(가장 빠른 번호) 인덱스 찾기
+    # 대기 상태 중 첫 번째 항목 찾기
     default_idx = 0
     for i, r in enumerate(row_list):
         if r["상태"] == "대기":
             default_idx = i
             break
 
-    # 세션 상태를 이용해 선택 인덱스 유지 (자동 넘어가기 기능)
     if "selected_index" not in st.session_state:
         st.session_state.selected_index = default_idx
     
-    # 항목 선택창
     idx = st.selectbox(
         "항목 선택", 
         range(len(row_list)), 
-        index=st.session_state.selected_index,
+        index=min(st.session_state.selected_index, len(row_list)-1),
         format_func=lambda x: f"[{x+1}] {row_list[x]['날짜']} | {row_list[x]['식당명'] if row_list[x]['식당명'] else '미입력'} - {row_list[x]['상태']}"
     )
     
-    # 사용자가 직접 바꿨을 때 세션 업데이트
     st.session_state.selected_index = idx
     row = row_list[idx]
     
@@ -117,33 +112,47 @@ if not all_data.empty:
     with c1: 
         if row["사진데이터"]: st.image(base64.b64decode(row["사진데이터"]), width=300)
     with c2:
+        # [수정] 대기 상태인 경우 입력 필드 강제 초기화
+        is_pending = (row["상태"] == "대기")
+        
         f1, f2 = st.columns(2)
         with f1:
             try: d_val = datetime.strptime(row["날짜"], '%y-%m-%d')
             except: d_val = datetime.now()
             u_date = st.date_input("날짜", d_val)
-            u_name = st.text_input("식당명", row["식당명"])
+            # 대기 상태면 빈칸, 완료 상태면 기존 값 표시
+            u_name = st.text_input("식당명", value="" if is_pending else row["식당명"])
         with f2:
             meal_opts = ["조식", "중식", "석식"]
-            curr_meal = row["시간대"] if row["시간대"] in meal_opts else "중식"
-            u_meal = st.selectbox("시간대", meal_opts, index=meal_opts.index(curr_meal))
-            u_price = st.text_input("금액", value=format_price(row["금액"]))
-        u_note = st.text_input("비고", row["비고"])
+            # 대기 상태면 무조건 '중식' 기본 체크
+            u_meal = st.selectbox("시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
+            # 대기 상태면 금액 빈칸
+            u_price = st.text_input("금액", value="" if is_pending else format_price(row["금액"]))
+        u_note = st.text_input("비고", value="" if is_pending else row["비고"])
         
         if st.button("💾 이 항목 저장", use_container_width=True):
-            row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": format_price(u_price), "비고": u_note, "상태": "완료"})
+            # 저장 시점에 포맷팅하여 저장
+            row_list[idx].update({
+                "날짜": u_date.strftime('%y-%m-%d'), 
+                "식당명": u_name, 
+                "시간대": u_meal, 
+                "금액": format_price(u_price), 
+                "비고": u_note, 
+                "상태": "완료"
+            })
             new_df = pd.DataFrame(row_list)
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df[COLUMNS])
             
-            # [핵심] 저장 후 다음 '대기' 항목 인덱스 미리 계산해서 세션에 넣기
+            # 저장 후 다음 대기 항목으로 인덱스 이동
+            st.cache_data.clear()
+            # 리런 직전에 다음 대기 인덱스 재계산
+            all_data_new = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
             next_idx = 0
-            for i, r in enumerate(row_list):
+            for i, r in enumerate(all_data_new.to_dict('records')):
                 if r["상태"] == "대기":
                     next_idx = i
                     break
             st.session_state.selected_index = next_idx
-            
-            st.cache_data.clear()
             st.rerun()
 
 # --- 3단계: 내역 확인 및 체크 삭제 ---
@@ -173,8 +182,6 @@ if not all_data.empty:
             remaining_df = all_data.drop(all_data.index[real_indices])
             save_df = remaining_df[COLUMNS] if not remaining_df.empty else pd.DataFrame(columns=COLUMNS)
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=save_df)
-            
-            # 삭제 후에도 다시 첫 번째 대기 항목 잡기
             st.session_state.selected_index = 0 
             st.cache_data.clear()
             st.rerun()
