@@ -47,10 +47,9 @@ def create_photo_pdf(df):
         except: continue
     return bytes(pdf.output())
 
-# 1. 데이터 불러오기 (TTL 0으로 설정해서 매번 새로 읽음)
+# 1. 데이터 불러오기
 COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
 try:
-    # 캐시를 타지 않게 하기 위해 명시적으로 ttl=0 설정
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
     all_data = all_data[all_data["사진데이터"] != "nan"].fillna("")
     if not all_data.empty:
@@ -86,34 +85,34 @@ if not all_data.empty:
     st.subheader("💻 2단계: 개별 내용 수정")
     row_list = all_data.to_dict('records')
     
-    # 대기 상태 중 첫 번째 항목 찾기
-    default_idx = 0
-    for i, r in enumerate(row_list):
-        if r["상태"] == "대기":
-            default_idx = i
-            break
-
-    if "selected_index" not in st.session_state:
+    # [수정] 세션에 저장된 인덱스가 없거나 데이터 범위를 벗어나면 '대기' 항목 첫 번째로 설정
+    if "selected_index" not in st.session_state or st.session_state.selected_index >= len(row_list):
+        default_idx = 0
+        for i, r in enumerate(row_list):
+            if r["상태"] == "대기":
+                default_idx = i
+                break
         st.session_state.selected_index = default_idx
-    
-    # 인덱스 범위 초과 방지
-    current_idx = min(st.session_state.selected_index, len(row_list)-1)
     
     idx = st.selectbox(
         "항목 선택", 
         range(len(row_list)), 
-        index=current_idx,
+        index=st.session_state.selected_index,
         format_func=lambda x: f"[{x+1}] {row_list[x]['날짜']} | {row_list[x]['식당명'] if row_list[x]['식당명'] else '미입력'} - {row_list[x]['상태']}"
     )
     
-    st.session_state.selected_index = idx
+    # 사용자가 직접 바꿨을 때만 세션 업데이트
+    if idx != st.session_state.selected_index:
+        st.session_state.selected_index = idx
+        st.rerun()
+
     row = row_list[idx]
+    is_pending = (row["상태"] == "대기")
     
     c1, c2 = st.columns([1, 2])
     with c1: 
         if row["사진데이터"]: st.image(base64.b64decode(row["사진데이터"]), width=300)
     with c2:
-        is_pending = (row["상태"] == "대기")
         f1, f2 = st.columns(2)
         with f1:
             try: d_val = datetime.strptime(row["날짜"], '%y-%m-%d')
@@ -133,7 +132,16 @@ if not all_data.empty:
             })
             new_df = pd.DataFrame(row_list)
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df[COLUMNS])
+            
+            # [핵심] 저장 후, 남은 데이터 중 다시 '대기' 첫 번째 항목 찾아서 세션에 저장
             st.cache_data.clear()
+            fresh_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
+            next_idx = 0
+            for i, r in enumerate(fresh_data.to_dict('records')):
+                if r["상태"] == "대기":
+                    next_idx = i
+                    break
+            st.session_state.selected_index = next_idx
             st.rerun()
 
 # --- 3단계: 내역 확인 및 체크 삭제 ---
@@ -152,8 +160,7 @@ if not all_data.empty:
             "삭제체크": st.column_config.CheckboxColumn(label="삭제체크", default=False),
             "금액": st.column_config.TextColumn("금액")
         },
-        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"],
-        key="data_editor" # 키 고정
+        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"]
     )
     
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
@@ -161,17 +168,10 @@ if not all_data.empty:
     
     if real_indices:
         if st.button(f"🗑️ 체크한 {len(real_indices)}개 항목 일괄 삭제", type="primary", use_container_width=True):
-            # [강화] 삭제 로직: 해당 인덱스 제외하고 새로 구성
             remaining_df = all_data.drop(all_data.index[real_indices]).reset_index(drop=True)
-            
-            # 구글 시트 업데이트 (데이터가 없으면 헤더만 남김)
             save_df = remaining_df[COLUMNS] if not remaining_df.empty else pd.DataFrame(columns=COLUMNS)
-            
-            # 시트 업데이트 전 캐시 삭제
             st.cache_data.clear()
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=save_df)
-            
-            # 삭제 후 세션 인덱스 초기화 및 리런
             st.session_state.selected_index = 0
             st.rerun()
 
