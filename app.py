@@ -43,7 +43,7 @@ def img_to_base64(image):
     image.save(buffered, format="JPEG", quality=30) 
     return base64.b64encode(buffered.getvalue()).decode()
 
-# [수정] PDF 내 영수증 사이즈를 기존처럼 적절하게 조정
+# [핵심 수정] PDF 내 영수증 사이즈를 작게 줄이고 위치 조정
 def create_photo_pdf(df):
     pdf = FPDF()
     font_path = "NanumGothic.ttf"
@@ -61,17 +61,22 @@ def create_photo_pdf(df):
         try:
             img_data = base64.b64decode(row["사진데이터"])
             temp_img = io.BytesIO(img_data)
-            x, y = (10 if i % 2 == 0 else 105), (15 if i % 4 < 2 else 153)
             
-            # [복구] 사진 너비를 90으로 유지하되 높이 자동 조절되도록 수정
-            pdf.image(temp_img, x=x, y=y, w=90)
+            # 한 페이지에 4개 배치 (2x2)
+            # x좌표: 왼쪽(15), 오른쪽(110)
+            # y좌표: 위쪽(15), 아래쪽(150)
+            x = 15 if i % 2 == 0 else 110
+            y = 15 if i % 4 < 2 else 150
             
-            # 사진 바로 밑에 정보 출력 (기존 위치로 복구)
-            pdf.set_xy(x, y + 62)
+            # [사이즈 축소] 너비를 80mm로 줄여서 '개크게' 안 나오게 수정
+            pdf.image(temp_img, x=x, y=y, w=80)
+            
+            # 사진 바로 밑(y+110 지점)에 정보 출력
+            pdf.set_xy(x, y + 105)
             p_val = f"{row['금액']}원" if "원" not in str(row['금액']) else row['금액']
             display_meal = clean_meal_name(row['시간대'])
             info_text = f"{row['날짜']} / {row['식당명']} / {display_meal} / {p_val}"
-            pdf.cell(90, 8, info_text, ln=0, align='C')
+            pdf.cell(80, 8, info_text, ln=0, align='C')
         except: continue
     return bytes(pdf.output())
 
@@ -110,7 +115,7 @@ with st.expander("📸 1단계: 사진 업로드", expanded=True):
                 time.sleep(1)
                 st.rerun()
 
-# --- 2단계: 개별 내용 수정 (버튼 꽉 채움) ---
+# --- 2단계: 개별 내용 수정 ---
 st.divider()
 if not all_data.empty:
     st.subheader("💻 2단계: 개별 내용 수정")
@@ -157,7 +162,7 @@ if not all_data.empty:
                 time.sleep(0.5)
                 st.rerun()
 
-# --- 3단계: 내역 확인 및 삭제 (버튼 꽉 채움) ---
+# --- 3단계: 내역 확인 및 삭제 ---
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 삭제")
@@ -173,7 +178,7 @@ if not all_data.empty:
             st.cache_data.clear()
             st.rerun()
 
-# --- 4단계: 다운로드 (PC 반반 / 모바일 한줄씩) ---
+# --- 4단계: 다운로드 ---
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"]
 if not done_df.empty:
