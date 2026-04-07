@@ -7,17 +7,18 @@ import base64
 from PIL import Image, ImageOps
 from fpdf import FPDF
 import time
-import os  # << 이 줄이 빠져서 에러가 났던 것입니다! 추가했습니다.
+import os
 
 # 0. 기본 설정
 st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 시간대별 정렬 우선순위
+# [수정] 정렬 우선순위 및 시간대 옵션
+MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5}
+
 def get_meal_priority(meal_name):
-    priority = {"조식": 1, "중식": 2, "석식": 3}
-    return priority.get(meal_name, 4)
+    return MEAL_ORDER.get(meal_name, 6)
 
 def format_price(val):
     try:
@@ -40,18 +41,17 @@ def img_to_base64(image):
     image.save(buffered, format="JPEG", quality=30) 
     return base64.b64encode(buffered.getvalue()).decode()
 
-# [수정] PDF 사진 하단에 정보 출력 (다른 로직은 유지)
+# [수정] PDF 배치 로직 (겹침 방지 및 사진 밑 정보 출력)
 def create_photo_pdf(df):
     pdf = FPDF()
-    
-    # 한글 폰트 설정 (깃허브에 NanumGothic.ttf 파일이 있어야 함)
     font_path = "NanumGothic.ttf"
-    if os.path.exists(font_path): # 이제 NameError가 나지 않습니다.
+    if os.path.exists(font_path):
         pdf.add_font('Nanum', '', font_path, uni=True)
-        pdf.set_font('Nanum', size=8) # 작은 한 줄을 위해 사이즈 8
+        pdf.set_font('Nanum', size=8) 
     else:
         pdf.set_font("Arial", size=8)
 
+    # 요청하신 순서대로 정렬
     df['temp_p'] = df['시간대'].apply(get_meal_priority)
     df_sorted = df.sort_values(by=["날짜", "temp_p"]).reset_index(drop=True)
 
@@ -60,18 +60,25 @@ def create_photo_pdf(df):
         try:
             img_data = base64.b64decode(row["사진데이터"])
             temp_img = io.BytesIO(img_data)
-            x, y = (10 if i % 2 == 0 else 105), (15 if i % 4 < 2 else 153)
-            pdf.image(temp_img, x=x, y=y, w=90)
             
-            # [요청사항] 사진 바로 밑에 정보 출력
-            pdf.set_xy(x, y + 62)
-            price_str = f"{row['금액']}원" if "원" not in str(row['금액']) else row['금액']
-            info_text = f"{row['날짜']} / {row['식당명']} / {row['시간대']} / {price_str}"
-            pdf.cell(90, 8, info_text, ln=0, align='C')
+            # x좌표: 왼쪽(10), 오른쪽(105)
+            x = 10 if i % 2 == 0 else 105
+            # y좌표: 사진 시작 위치를 위로 올림 (10, 145)
+            y = 10 if i % 4 < 2 else 145
+            
+            # 영수증 이미지 출력 (높이를 120mm로 제한하여 겹침 방지)
+            pdf.image(temp_img, x=x, y=y, w=90, h=120)
+            
+            # [좌표 핵심 수정] 사진이 끝나는 y+122 지점에 텍스트 출력
+            pdf.set_xy(x, y + 122)
+            p_val = f"{row['금액']}원" if "원" not in str(row['금액']) else row['금액']
+            info_text = f"{row['날짜']} / {row['식당명']} / {row['시간대']} / {p_val}"
+            
+            pdf.cell(90, 10, info_text, ln=0, align='C')
         except: continue
     return bytes(pdf.output())
 
-# 1. 데이터 로드 및 이중 정렬
+# 1. 데이터 로드 및 정렬
 COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
 try:
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
@@ -119,11 +126,8 @@ if not all_data.empty:
                 break
     
     curr_idx = min(st.session_state.selected_index, len(row_list)-1)
-    
     idx = st.selectbox(
-        "항목 선택", 
-        range(len(row_list)), 
-        index=curr_idx,
+        "항목 선택", range(len(row_list)), index=curr_idx,
         format_func=lambda x: f"[{x+1}] {row_list[x]['날짜']} | {row_list[x]['식당명'] if row_list[x]['식당명'] else '미입력'} - {row_list[x]['상태']}"
     )
     
@@ -145,9 +149,10 @@ if not all_data.empty:
             u_date = st.date_input("날짜", d_val)
             u_name = st.text_input("식당명", value="" if is_pending else row["식당명"])
         with f2:
-            meal_opts = ["조식", "중식", "석식"]
+            # [수정] 요청하신 5가지 시간대 옵션 적용
+            meal_opts = ["조식", "중식", "중식2", "석식", "석식2"]
             u_meal = st.selectbox("시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
-            u_price = st.text_input("금액", value="" if is_pending else format_price(row["금액"]))
+            u_price = st.text_input("금액", value="" if is_pending else row["금액"])
         u_note = st.text_input("비고", value="" if is_pending else row["비고"])
         
         if st.button("💾 이 항목 저장", use_container_width=True):
@@ -156,8 +161,7 @@ if not all_data.empty:
                     "날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, 
                     "금액": format_price(u_price), "비고": u_note, "상태": "완료"
                 })
-                new_df = pd.DataFrame(row_list)
-                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df[COLUMNS])
+                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=pd.DataFrame(row_list)[COLUMNS])
                 st.cache_data.clear()
                 
                 next_idx = idx
@@ -186,14 +190,13 @@ if not all_data.empty:
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
     real_indices = [i-1 for i in checked_indices]
     
-    if real_indices:
-        if st.button(f"🗑️ {len(real_indices)}개 항목 일괄 삭제", type="primary", use_container_width=True):
-            remaining_df = all_data.drop(all_data.index[real_indices]).reset_index(drop=True)
-            conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
-            st.cache_data.clear()
-            st.session_state.selected_index = 0
-            time.sleep(1)
-            st.rerun()
+    if real_indices and st.button(f"🗑️ {len(real_indices)}개 항목 일괄 삭제", type="primary", use_container_width=True):
+        remaining_df = all_data.drop(all_data.index[real_indices]).reset_index(drop=True)
+        conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
+        st.cache_data.clear()
+        st.session_state.selected_index = 0
+        time.sleep(1)
+        st.rerun()
 
 # --- 4단계: 다운로드 ---
 st.divider()
