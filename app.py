@@ -13,7 +13,6 @@ st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 시간대별 정렬 우선순위 정의 (조식-1, 중식-2, 석식-3)
 def get_meal_priority(meal_name):
     priority = {"조식": 1, "중식": 2, "석식": 3}
     return priority.get(meal_name, 4)
@@ -39,10 +38,16 @@ def img_to_base64(image):
     image.save(buffered, format="JPEG", quality=30) 
     return base64.b64encode(buffered.getvalue()).decode()
 
-# [수정] PDF 사진 하단에 상세 내역 (날짜/식당명/시간대/금액) 추가
+# [중요] PDF 한글 폰트 적용 및 정보 출력 함수
 def create_photo_pdf(df):
     pdf = FPDF()
-    pdf.set_font("Arial", size=10) # 한글 폰트 설정이 안 된 경우 영문 위주로 표시됨
+    try:
+        # 나눔고딕 폰트 추가 (파일이 같은 경로에 있어야 함)
+        pdf.add_font('Nanum', '', 'NanumGothic.ttf', uni=True)
+        pdf.set_font('Nanum', size=10)
+    except:
+        # 폰트 파일이 없을 경우 대비
+        pdf.set_font("Arial", size=10)
     
     # 정렬: 날짜 -> 시간대 순
     df['temp_p'] = df['시간대'].apply(get_meal_priority)
@@ -54,17 +59,19 @@ def create_photo_pdf(df):
             img_data = base64.b64decode(row["사진데이터"])
             temp_img = io.BytesIO(img_data)
             
-            x, y = (10 if i % 2 == 0 else 105), (10 if i % 4 < 2 else 148)
-            pdf.image(temp_img, x=x, y=y, w=90)
+            x, y = (10 if i % 2 == 0 else 105), (15 if i % 4 < 2 else 153)
+            pdf.image(temp_img, x=x, y=y-5, w=90) # 사진 위치 미세 조정
             
-            # 사진 하단 텍스트 추가 (날짜/식당명/시간대/금액)
+            # [수정] 사진 하단에 상세 내역 출력
             pdf.set_xy(x, y + 62)
-            info_text = f"{row['날짜']} / {row['식당명']} / {row['시간대']} / {row['금액']}"
+            info_text = f"{row['날짜']} / {row['식당명']} / {row['시간대']} / {row['금액']}원"
             pdf.cell(90, 10, info_text, ln=0, align='C')
         except: continue
+    
+    if 'temp_p' in df.columns: df.drop(columns=['temp_p'], inplace=True)
     return bytes(pdf.output())
 
-# 1. 데이터 로드 및 [날짜/시간대 이중 정렬]
+# 1. 데이터 로드 및 정렬
 COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
 try:
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
@@ -72,7 +79,6 @@ try:
     if not all_data.empty:
         all_data['날짜'] = all_data['날짜'].apply(fix_date)
         all_data['금액'] = all_data['금액'].apply(format_price)
-        # 정렬 로직 적용
         all_data['temp_p'] = all_data['시간대'].apply(get_meal_priority)
         all_data = all_data.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True)
         all_data = all_data.drop(columns=['temp_p'])
@@ -137,14 +143,12 @@ if not all_data.empty:
             try: d_val = datetime.strptime(row["날짜"], '%y-%m-%d')
             except: d_val = datetime.now()
             u_date = st.date_input("날짜", d_val)
-            # [수정] 대기 상태 항목이면 입력창을 강제로 빈칸으로 초기화
+            # 입력란 초기화 적용
             u_name = st.text_input("식당명", value="" if is_pending else row["식당명"])
         with f2:
             meal_opts = ["조식", "중식", "석식"]
             u_meal = st.selectbox("시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
-            # [수정] 대기 상태 항목이면 금액도 빈칸
             u_price = st.text_input("금액", value="" if is_pending else format_price(row["금액"]))
-        # [수정] 비고란도 대기 상태면 빈칸
         u_note = st.text_input("비고", value="" if is_pending else row["비고"])
         
         if st.button("💾 이 항목 저장", use_container_width=True):
@@ -206,5 +210,5 @@ if not done_df.empty:
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
     with d2:
         pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
-        # 상세 정보가 포함된 PDF 생성 함수 호출
+        # 상세 정보 포함 PDF 다운로드
         st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf")
