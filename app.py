@@ -40,7 +40,7 @@ def img_to_base64(image):
     image.save(buffered, format="JPEG", quality=30) 
     return base64.b64encode(buffered.getvalue()).decode()
 
-# [핵심] PDF 생성 함수 - 위치 및 한글 폰트 최적화
+# [핵심 수정] create_photo_pdf 함수의 좌표값 조정 (사진 밑으로 이동)
 def create_photo_pdf(df):
     pdf = FPDF()
     
@@ -48,9 +48,10 @@ def create_photo_pdf(df):
     font_path = "NanumGothic.ttf"
     if os.path.exists(font_path):
         pdf.add_font('Nanum', '', font_path, uni=True)
-        pdf.set_font('Nanum', size=9) # 가독성을 위해 사이즈 9로 살짝 조정
+        # 작은 글씨 요청 반영 (사이즈 8로 설정)
+        pdf.set_font('Nanum', size=8) 
     else:
-        pdf.set_font("Arial", size=9)
+        pdf.set_font("Arial", size=8)
 
     # 정렬 적용
     df['temp_p'] = df['시간대'].apply(get_meal_priority)
@@ -66,19 +67,25 @@ def create_photo_pdf(df):
             x = 10 if i % 2 == 0 else 105
             y = 15 if i % 4 < 2 else 150
             
-            # 영수증 이미지 출력 (높이 약 60mm)
+            # 영수증 이미지 출력 (너비 90mm, 높이는 너비 비율에 따라 자동 조정됨)
             pdf.image(temp_img, x=x, y=y, w=90)
             
-            # [수정] 텍스트가 잘 보이도록 좌표 재설정 (이미지 바로 아래)
-            pdf.set_xy(x, y + 62)
+            # [좌표 수정] 텍스트 위치를 이미지 바로 아래로 이동
+            # 이미지 높이가 대략 50mm 전후이므로, y+55 지점으로 텍스트 좌표 설정
+            pdf.set_xy(x, y + 55)
+            
             p_val = row['금액'] if "원" in str(row['금액']) else f"{row['금액']}원"
             info_text = f"{row['날짜']} / {row['식당명']} / {row['시간대']} / {p_val}"
             
-            # 한글 텍스트 출력
-            pdf.cell(90, 10, info_text, ln=0, align='C')
-        except: continue
+            # 중앙 정렬('C')로 깔끔하게 한 줄 출력
+            pdf.cell(90, 8, info_text, ln=0, align='C')
+        except Exception as e: 
+            st.error(f"PDF 생성 중 오류: {e}")
+            continue
+            
     return bytes(pdf.output())
 
+# --- 이하 데이터 로드 및 UI 로직 (기존 유지) ---
 # 1. 데이터 로드 및 정렬
 COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
 try:
