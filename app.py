@@ -14,16 +14,9 @@ st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# [수정] 정렬용 우선순위 (중식1 -> 중식2 -> 석식1 -> 석식2 순)
 def get_meal_priority(meal_name):
-    priority = {"조식": 1, "중식": 2, "중식1": 2.1, "중식2": 2.2, "석식": 3, "석식1": 3.1, "석식2": 3.2}
+    priority = {"조식": 1, "중식": 2, "석식": 3}
     return priority.get(meal_name, 4)
-
-# [추가] 엑셀/PDF 출력 시 이름을 '중식', '석식'으로 합쳐주는 함수
-def clean_meal_name(meal_name):
-    if "중식" in meal_name: return "중식"
-    if "석식" in meal_name: return "석식"
-    return meal_name
 
 def format_price(val):
     try:
@@ -46,7 +39,7 @@ def img_to_base64(image):
     image.save(buffered, format="JPEG", quality=30) 
     return base64.b64encode(buffered.getvalue()).decode()
 
-# PDF 생성 (출력 시에는 중식1 -> 중식으로 변경)
+# [좌표 재설정] 사진은 위로 올리고, 글자는 아래로 확실히 내림
 def create_photo_pdf(df):
     pdf = FPDF()
     font_path = "NanumGothic.ttf"
@@ -64,22 +57,28 @@ def create_photo_pdf(df):
         try:
             img_data = base64.b64decode(row["사진데이터"])
             temp_img = io.BytesIO(img_data)
+            
+            # x좌표: 왼쪽(10), 오른쪽(105)
             x = 10 if i % 2 == 0 else 105
+            
+            # [수정] y좌표 (사진 시작점을 더 위로 올림: 10, 145)
             y = 10 if i % 4 < 2 else 145
+            
+            # 영수증 이미지 출력 (높이를 120mm로 제한하여 글자와 안 겹치게 함)
             pdf.image(temp_img, x=x, y=y, w=90, h=120)
             
+            # [수정] 글자 좌표를 사진 영역(120mm)보다 아래인 y+122 지점으로 설정
             pdf.set_xy(x, y + 122)
-            p_val = row['금액'] if "원" in str(row['금액']) else f"{row['금액']}원"
             
-            # [수정] PDF 출력 시 이름 치환 (중식1 -> 중식)
-            display_meal = clean_meal_name(row['시간대'])
-            info_text = f"{row['날짜']} / {row['식당명']} / {display_meal} / {p_val}"
+            p_val = row['금액'] if "원" in str(row['금액']) else f"{row['금액']}원"
+            info_text = f"{row['날짜']} / {row['식당명']} / {row['시간대']} / {p_val}"
             
             pdf.cell(90, 8, info_text, ln=0, align='C')
         except: continue
+            
     return bytes(pdf.output())
 
-# 1. 데이터 로드
+# --- 이하 로직 동일 ---
 COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
 try:
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
@@ -95,7 +94,6 @@ except:
 
 st.title("📑 법카 영수증 관리")
 
-# --- 1단계: 사진 업로드 ---
 with st.expander("📸 1단계: 사진 업로드", expanded=False):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files and st.button("🚀 사진 전송"):
@@ -113,7 +111,6 @@ with st.expander("📸 1단계: 사진 업로드", expanded=False):
             time.sleep(1)
             st.rerun()
 
-# --- 2단계: 개별 내용 수정 ---
 st.divider()
 if not all_data.empty:
     st.subheader("💻 2단계: 개별 내용 수정")
@@ -144,8 +141,7 @@ if not all_data.empty:
             u_date = st.date_input("날짜", d_val)
             u_name = st.text_input("식당명", value="" if is_pending else row["식당명"])
         with f2:
-            # [수정] 중식1, 2 / 석식1, 2 옵션 추가
-            meal_opts = ["조식", "중식", "중식1", "중식2", "석식", "석식1", "석식2"]
+            meal_opts = ["조식", "중식", "석식"]
             u_meal = st.selectbox("시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             u_price = st.text_input("금액", value="" if is_pending else row["금액"])
         u_note = st.text_input("비고", value="" if is_pending else row["비고"])
@@ -161,15 +157,6 @@ if not all_data.empty:
                 time.sleep(0.5)
                 st.rerun()
 
-# --- 3단계: 내역 확인 및 삭제 ---
-if not all_data.empty:
-    st.divider()
-    st.subheader("👀 3단계: 내역 확인 및 삭제")
-    edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
-    edit_df.insert(0, "선택", False)
-    st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
-
-# --- 4단계: 다운로드 ---
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"]
 if not done_df.empty:
@@ -177,10 +164,7 @@ if not done_df.empty:
     d1, d2 = st.columns(2)
     with d1:
         ex_out = io.BytesIO()
-        # [수정] 엑셀 다운로드 시에도 이름을 '중식', '석식'으로 통일
-        excel_df = done_df.drop(columns=["사진데이터", "상태"]).copy()
-        excel_df["시간대"] = excel_df["시간대"].apply(clean_meal_name)
-        excel_df.to_excel(ex_out, index=False)
+        done_df.drop(columns=["사진데이터", "상태"]).to_excel(ex_out, index=False)
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
     with d2:
         pdf_fn = f"{datetime.now().month}월 영수증_한정민.pdf"
