@@ -13,21 +13,17 @@ st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# [수정] 금액 포맷: 소수점 무조건 제거 및 세자리 쉼표
 def format_price(val):
     try:
         if not val or str(val).lower() in ['nan', '0', '']: return ""
         clean_val = str(val).split('.')[0].replace(',', '')
-        if clean_val.isdigit():
-            return f"{int(clean_val):,}"
+        if clean_val.isdigit(): return f"{int(clean_val):,}"
         return val
-    except:
-        return ""
+    except: return ""
 
-# [수정] 날짜 형식 강제 통일 (26-04-07 형태)
 def fix_date(d):
     d_str = str(d).strip()
-    if len(d_str) > 8: return d_str[-8:] # 2026-04-07 -> 26-04-07
+    if len(d_str) > 8: return d_str[-8:] 
     return d_str
 
 def img_to_base64(image):
@@ -38,21 +34,32 @@ def img_to_base64(image):
     image.save(buffered, format="JPEG", quality=30) 
     return base64.b64encode(buffered.getvalue()).decode()
 
+# [수정] PDF 생성 시 사진 밑에 정보 추가 (날짜/식당명/시간대/금액)
 def create_photo_pdf(df):
     pdf = FPDF()
-    # 날짜순 정렬하여 PDF 생성
+    # 폰트 설정 (한글 깨짐 방지를 위해 기본 폰트 사용 시 영문 위주, 한글 필요 시 나눔고딕 등 추가 필요)
+    pdf.set_font("Arial", size=10)
+    
+    # [핵심] PDF 만들 때도 무조건 날짜 순 정렬
     df_sorted = df.sort_values(by="날짜").reset_index(drop=True)
+    
     for i, (_, row) in enumerate(df_sorted.iterrows()):
         if i % 4 == 0: pdf.add_page()
         try:
             img_data = base64.b64decode(row["사진데이터"])
             temp_img = io.BytesIO(img_data)
+            
             x, y = (10 if i % 2 == 0 else 105), (10 if i % 4 < 2 else 148)
             pdf.image(temp_img, x=x, y=y, w=90)
+            
+            # 사진 바로 밑에 텍스트 추가 (위치 조정)
+            pdf.set_xy(x, y + 62)
+            info_text = f"{row['날짜']} / {row['식당명']} / {row['시간대']} / {row['금액']}"
+            pdf.cell(90, 10, info_text, ln=0, align='C')
         except: continue
     return bytes(pdf.output())
 
-# 1. 데이터 불러오기
+# 1. 데이터 불러오기 및 [강력 정렬]
 COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
 try:
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
@@ -60,7 +67,8 @@ try:
     if not all_data.empty:
         all_data['날짜'] = all_data['날짜'].apply(fix_date)
         all_data['금액'] = all_data['금액'].apply(format_price)
-        all_data = all_data.reset_index(drop=True)
+        # [핵심] 불러오자마자 날짜순으로 정렬해서 번호 부여
+        all_data = all_data.sort_values(by="날짜", ascending=True).reset_index(drop=True)
 except:
     all_data = pd.DataFrame(columns=COLUMNS)
 
@@ -100,7 +108,6 @@ if not all_data.empty:
     
     curr_idx = min(st.session_state.selected_index, len(row_list)-1)
     
-    # [수정] 번호 1번부터 표시
     idx = st.selectbox(
         "항목 선택", 
         range(len(row_list)), 
@@ -132,32 +139,35 @@ if not all_data.empty:
         u_note = st.text_input("비고", value="" if is_pending else row["비고"])
         
         if st.button("💾 이 항목 저장", use_container_width=True):
-            row_list[idx].update({
-                "날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, 
-                "금액": format_price(u_price), "비고": u_note, "상태": "완료"
-            })
-            new_df = pd.DataFrame(row_list)
-            conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df[COLUMNS])
-            
-            st.cache_data.clear()
-            time.sleep(0.5)
-            # 다음 대기 항목으로 자동 이동
-            next_idx = idx
-            for i in range(len(row_list)):
-                if row_list[i]["상태"] == "대기":
-                    next_idx = i
-                    break
-            st.session_state.selected_index = next_idx
-            st.rerun()
+            # 시트 업데이트 전 API 에러 방지 지연
+            with st.spinner("저장 중..."):
+                row_list[idx].update({
+                    "날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, 
+                    "금액": format_price(u_price), "비고": u_note, "상태": "완료"
+                })
+                new_df = pd.DataFrame(row_list)
+                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_df[COLUMNS])
+                st.cache_data.clear()
+                time.sleep(1)
+                
+                # 다음 대기 항목 찾기
+                next_idx = idx
+                for i in range(len(row_list)):
+                    if row_list[i]["상태"] == "대기":
+                        next_idx = i
+                        break
+                st.session_state.selected_index = next_idx
+                st.rerun()
 
 # --- 3단계: 내역 확인 및 체크 삭제 ---
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 체크 삭제")
     
+    # 표에서도 날짜순 정렬된 상태 유지
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
     edit_df["삭제체크"] = False
-    edit_df.index = edit_df.index + 1 # 표 번호 1번부터
+    edit_df.index = edit_df.index + 1 
     
     edited_data = st.data_editor(
         edit_df,
@@ -178,9 +188,9 @@ if not all_data.empty:
             time.sleep(1)
             st.rerun()
 
-# --- 4단계: 다운로드 (여기 있습니다!) ---
+# --- 4단계: 다운로드 ---
 st.divider()
-done_df = all_data[all_data["상태"] == "완료"] if not all_data.empty else pd.DataFrame()
+done_df = all_data[all_data["상태"] == "완료"]
 if not done_df.empty:
     st.subheader("📥 4단계: 다운로드")
     d1, d2 = st.columns(2)
@@ -191,4 +201,5 @@ if not done_df.empty:
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
     with d2:
         pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
+        # [수정] 사진 밑에 정보가 포함된 PDF 다운로드
         st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf")
