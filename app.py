@@ -20,7 +20,7 @@ MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5}
 def get_meal_priority(meal_name):
     return MEAL_ORDER.get(meal_name, 6)
 
-# [출력용] 숫자를 제거하여 '중식', '석식'으로만 보이게 하는 함수
+# [출력용] 숫자 제거 함수
 def clean_meal_name(meal_name):
     if "중식" in meal_name: return "중식"
     if "석식" in meal_name: return "석식"
@@ -47,7 +47,6 @@ def img_to_base64(image):
     image.save(buffered, format="JPEG", quality=30) 
     return base64.b64encode(buffered.getvalue()).decode()
 
-# PDF 생성 로직 (출력 시 숫자가 제거된 명칭 사용)
 def create_photo_pdf(df):
     pdf = FPDF()
     font_path = "NanumGothic.ttf"
@@ -67,14 +66,10 @@ def create_photo_pdf(df):
             temp_img = io.BytesIO(img_data)
             x, y = (10 if i % 2 == 0 else 105), (10 if i % 4 < 2 else 145)
             pdf.image(temp_img, x=x, y=y, w=90, h=120)
-            
             pdf.set_xy(x, y + 122)
             p_val = f"{row['금액']}원" if "원" not in str(row['금액']) else row['금액']
-            
-            # [수정] PDF 출력 시 숫자를 떼고 출력 (중식2 -> 중식)
             display_meal = clean_meal_name(row['시간대'])
             info_text = f"{row['날짜']} / {row['식당명']} / {display_meal} / {p_val}"
-            
             pdf.cell(90, 10, info_text, ln=0, align='C')
         except: continue
     return bytes(pdf.output())
@@ -95,8 +90,8 @@ except:
 
 st.title("📑 법카 영수증 관리")
 
-# --- 1단계: 사진 업로드 ---
-with st.expander("📸 1단계: 사진 업로드", expanded=False):
+# --- [수정] 1단계: 사진 업로드 (expanded=True로 항상 열림) ---
+with st.expander("📸 1단계: 사진 업로드", expanded=True):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files and st.button("🚀 사진 전송"):
         new_list = []
@@ -160,10 +155,10 @@ if not all_data.empty:
                 time.sleep(0.5)
                 st.rerun()
 
-# --- 3단계: 내역 확인 및 삭제 ---
+# --- 3단계: 내역 확인 및 체크 삭제 ---
 if not all_data.empty:
     st.divider()
-    st.subheader("👀 3단계: 내역 확인 및 체크 삭제")
+    st.subheader("👀 3단계: 내역 확인 및 삭제")
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
     edit_df["삭제체크"] = False
     edit_df.index = edit_df.index + 1 
@@ -184,7 +179,6 @@ if not done_df.empty:
     with d1:
         ex_out = io.BytesIO()
         excel_df = done_df.drop(columns=["사진데이터", "상태"], errors='ignore').copy()
-        # [수정] 엑셀 출력 시 숫자를 제거하여 '중식', '석식'으로 통일
         excel_df["시간대"] = excel_df["시간대"].apply(clean_meal_name)
         excel_df.to_excel(ex_out, index=False)
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
