@@ -4,7 +4,8 @@ import pandas as pd
 from datetime import datetime
 import io
 import base64
-from PIL import Image, ImageOps, ImageDraw, ImageFont
+from PIL import Image, ImageOps
+from fpdf import FPDF
 import time
 
 # 0. 기본 설정
@@ -12,6 +13,7 @@ st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+# 시간대별 정렬 우선순위
 def get_meal_priority(meal_name):
     priority = {"조식": 1, "중식": 2, "석식": 3}
     return priority.get(meal_name, 4)
@@ -37,42 +39,25 @@ def img_to_base64(image):
     image.save(buffered, format="JPEG", quality=30) 
     return base64.b64encode(buffered.getvalue()).decode()
 
-# [핵심] 폰트 에러 없는 새로운 PDF 생성 방식 (이미지에 글자를 입혀서 PDF로 저장)
 def create_photo_pdf(df):
+    pdf = FPDF()
+    pdf.set_font("Arial", size=10)
     df['temp_p'] = df['시간대'].apply(get_meal_priority)
     df_sorted = df.sort_values(by=["날짜", "temp_p"]).reset_index(drop=True)
-    
-    img_pages = []
     for i, (_, row) in enumerate(df_sorted.iterrows()):
+        if i % 4 == 0: pdf.add_page()
         try:
-            # 1. 이미지 불러오기
             img_data = base64.b64decode(row["사진데이터"])
-            main_img = Image.open(io.BytesIO(img_data)).convert("RGB")
-            
-            # 2. 이미지 아래에 여백 만들기 (글자 들어갈 공간)
-            w, h = main_img.size
-            new_h = h + int(h * 0.15)
-            combined_img = Image.new("RGB", (w, new_h), (255, 255, 255))
-            combined_img.paste(main_img, (0, 0))
-            
-            # 3. 글자 쓰기 (폰트 없으면 기본 폰트 사용)
-            draw = ImageDraw.Draw(combined_img)
-            info_text = f"{row['날짜']} / {row['식당명']} / {row['시간대']} / {row['금액']}원"
-            
-            # 텍스트 중앙 정렬 위치 계산
-            draw.text((w//10, h + 10), info_text, fill=(0, 0, 0))
-            
-            img_pages.append(combined_img)
+            temp_img = io.BytesIO(img_data)
+            x, y = (10 if i % 2 == 0 else 105), (10 if i % 4 < 2 else 148)
+            pdf.image(temp_img, x=x, y=y, w=90)
+            pdf.set_xy(x, y + 62)
+            info_text = f"{row['날짜']} / {row['식당명']} / {row['시간대']} / {row['금액']}"
+            pdf.cell(90, 10, info_text, ln=0, align='C')
         except: continue
-    
-    if not img_pages: return None
-    
-    # 이미지들을 하나의 PDF로 합치기
-    pdf_output = io.BytesIO()
-    img_pages[0].save(pdf_output, format="PDF", save_all=True, append_images=img_pages[1:])
-    return pdf_output.getvalue()
+    return bytes(pdf.output())
 
-# 1. 데이터 로드 및 정렬
+# 1. 데이터 로드 및 이중 정렬
 COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
 try:
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
@@ -133,6 +118,7 @@ if not all_data.empty:
         st.rerun()
 
     row = row_list[idx]
+    # [수정] '대기' 상태인 항목을 새로 선택하면 입력란을 무조건 빈칸으로 강제함
     is_pending = (row["상태"] == "대기")
     
     c1, c2 = st.columns([1, 2])
@@ -144,7 +130,7 @@ if not all_data.empty:
             try: d_val = datetime.strptime(row["날짜"], '%y-%m-%d')
             except: d_val = datetime.now()
             u_date = st.date_input("날짜", d_val)
-            # 입력란 초기화 (대기 상태면 무조건 빈칸)
+            # 대기 상태면 빈칸, 아니면 저장된 값
             u_name = st.text_input("식당명", value="" if is_pending else row["식당명"])
         with f2:
             meal_opts = ["조식", "중식", "석식"]
@@ -163,13 +149,14 @@ if not all_data.empty:
                 st.cache_data.clear()
                 time.sleep(1)
                 
-                # 저장 후 다음 대기 항목으로 자동 이동
+                # 저장 후 다음 대기 항목 찾기
                 next_idx = idx
                 for i in range(len(row_list)):
                     if row_list[i]["상태"] == "대기":
                         next_idx = i
                         break
                 st.session_state.selected_index = next_idx
+                # 리런하여 다음 항목의 입력창을 빈칸(is_pending=True)으로 만듦
                 st.rerun()
 
 # --- 3단계: 내역 확인 및 삭제 ---
@@ -211,8 +198,4 @@ if not done_df.empty:
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
     with d2:
         pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
-        pdf_data = create_photo_pdf(done_df)
-        if pdf_data:
-            st.download_button("📄 영수증 PDF 다운로드", pdf_data, pdf_fn, "application/pdf")
-        else:
-            st.warning("PDF를 생성할 완료 항목이 없습니다.")
+        st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf")
