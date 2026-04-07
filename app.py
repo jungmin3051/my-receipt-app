@@ -14,13 +14,9 @@ st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# [정렬용] 우선순위 설정
+# 정렬 및 이름 치환 로직
 MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5}
-
-def get_meal_priority(meal_name):
-    return MEAL_ORDER.get(meal_name, 6)
-
-# [출력용] 숫자 제거 함수
+def get_meal_priority(meal_name): return MEAL_ORDER.get(meal_name, 6)
 def clean_meal_name(meal_name):
     if "중식" in meal_name: return "중식"
     if "석식" in meal_name: return "석식"
@@ -90,25 +86,26 @@ except:
 
 st.title("📑 법카 영수증 관리")
 
-# --- [수정] 1단계: 사진 업로드 (expanded=True로 항상 열림) ---
+# --- 1단계: 사진 업로드 (버튼 꽉 채움) ---
 with st.expander("📸 1단계: 사진 업로드", expanded=True):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
-    if files and st.button("🚀 사진 전송"):
-        new_list = []
-        now = datetime.now()
-        for f in files:
-            try:
-                img_b64 = img_to_base64(Image.open(f))
-                new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", "금액": "", "비고": "", "사진데이터": img_b64, "상태": "대기"})
-            except Exception as e: st.error(f"오류: {e}")
-        if new_list:
-            updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
-            conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
-            st.cache_data.clear()
-            time.sleep(1)
-            st.rerun()
+    if files:
+        if st.button("🚀 사진 전송", use_container_width=True): # 가로 꽉 채움
+            new_list = []
+            now = datetime.now()
+            for f in files:
+                try:
+                    img_b64 = img_to_base64(Image.open(f))
+                    new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", "금액": "", "비고": "", "사진데이터": img_b64, "상태": "대기"})
+                except Exception as e: st.error(f"오류: {e}")
+            if new_list:
+                updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
+                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
+                st.cache_data.clear()
+                time.sleep(1)
+                st.rerun()
 
-# --- 2단계: 개별 내용 수정 ---
+# --- 2단계: 개별 내용 수정 (버튼 꽉 채움) ---
 st.divider()
 if not all_data.empty:
     st.subheader("💻 2단계: 개별 내용 수정")
@@ -130,7 +127,7 @@ if not all_data.empty:
     is_pending = (row["상태"] == "대기")
     c1, c2 = st.columns([1, 2])
     with c1: 
-        if row["사진데이터"]: st.image(base64.b64decode(row["사진데이터"]), width=300)
+        if row["사진데이터"]: st.image(base64.b64decode(row["사진데이터"]), use_container_width=True)
     with c2:
         f1, f2 = st.columns(2)
         with f1:
@@ -143,7 +140,7 @@ if not all_data.empty:
             u_meal = st.selectbox("시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             u_price = st.text_input("금액", value="" if is_pending else row["금액"])
         u_note = st.text_input("비고", value="" if is_pending else row["비고"])
-        if st.button("💾 이 항목 저장", use_container_width=True):
+        if st.button("💾 이 항목 저장", use_container_width=True): # 가로 꽉 채움
             with st.spinner("저장 중..."):
                 row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": format_price(u_price), "비고": u_note, "상태": "완료"})
                 conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=pd.DataFrame(row_list)[COLUMNS])
@@ -155,7 +152,7 @@ if not all_data.empty:
                 time.sleep(0.5)
                 st.rerun()
 
-# --- 3단계: 내역 확인 및 체크 삭제 ---
+# --- 3단계: 내역 확인 및 삭제 (버튼 꽉 채움) ---
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 삭제")
@@ -164,24 +161,26 @@ if not all_data.empty:
     edit_df.index = edit_df.index + 1 
     edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
-    if checked_indices and st.button("🗑️ 선택 삭제", type="primary"):
-        remaining_df = all_data.drop(all_data.index[[i-1 for i in checked_indices]]).reset_index(drop=True)
-        conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
-        st.cache_data.clear()
-        st.rerun()
+    if checked_indices:
+        if st.button(f"🗑️ {len(checked_indices)}개 항목 삭제하기", type="primary", use_container_width=True): # 가로 꽉 채움
+            remaining_df = all_data.drop(all_data.index[[i-1 for i in checked_indices]]).reset_index(drop=True)
+            conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
+            st.cache_data.clear()
+            st.rerun()
 
-# --- 4단계: 다운로드 ---
+# --- 4단계: 다운로드 (반반 배치 & 모바일 두 줄 대응) ---
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"]
 if not done_df.empty:
     st.subheader("📥 4단계: 다운로드")
-    d1, d2 = st.columns(2)
+    # gap="small"로 모바일에서 더 자연스럽게 배치되도록 설정
+    d1, d2 = st.columns(2, gap="small")
     with d1:
         ex_out = io.BytesIO()
         excel_df = done_df.drop(columns=["사진데이터", "상태"], errors='ignore').copy()
         excel_df["시간대"] = excel_df["시간대"].apply(clean_meal_name)
         excel_df.to_excel(ex_out, index=False)
-        st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
+        st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
     with d2:
         pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
-        st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf")
+        st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf", use_container_width=True)
