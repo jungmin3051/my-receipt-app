@@ -43,6 +43,7 @@ def img_to_base64(image):
     image.save(buffered, format="JPEG", quality=30) 
     return base64.b64encode(buffered.getvalue()).decode()
 
+# [수정] PDF 내 영수증 사이즈를 기존처럼 적절하게 조정
 def create_photo_pdf(df):
     pdf = FPDF()
     font_path = "NanumGothic.ttf"
@@ -60,13 +61,17 @@ def create_photo_pdf(df):
         try:
             img_data = base64.b64decode(row["사진데이터"])
             temp_img = io.BytesIO(img_data)
-            x, y = (10 if i % 2 == 0 else 105), (10 if i % 4 < 2 else 145)
-            pdf.image(temp_img, x=x, y=y, w=90, h=120)
-            pdf.set_xy(x, y + 122)
+            x, y = (10 if i % 2 == 0 else 105), (15 if i % 4 < 2 else 153)
+            
+            # [복구] 사진 너비를 90으로 유지하되 높이 자동 조절되도록 수정
+            pdf.image(temp_img, x=x, y=y, w=90)
+            
+            # 사진 바로 밑에 정보 출력 (기존 위치로 복구)
+            pdf.set_xy(x, y + 62)
             p_val = f"{row['금액']}원" if "원" not in str(row['금액']) else row['금액']
             display_meal = clean_meal_name(row['시간대'])
             info_text = f"{row['날짜']} / {row['식당명']} / {display_meal} / {p_val}"
-            pdf.cell(90, 10, info_text, ln=0, align='C')
+            pdf.cell(90, 8, info_text, ln=0, align='C')
         except: continue
     return bytes(pdf.output())
 
@@ -86,11 +91,11 @@ except:
 
 st.title("📑 법카 영수증 관리")
 
-# --- 1단계: 사진 업로드 (버튼 꽉 채움) ---
+# --- 1단계: 사진 업로드 (항상 열림 & 버튼 꽉 채움) ---
 with st.expander("📸 1단계: 사진 업로드", expanded=True):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files:
-        if st.button("🚀 사진 전송", use_container_width=True): # 가로 꽉 채움
+        if st.button("🚀 사진 전송", use_container_width=True):
             new_list = []
             now = datetime.now()
             for f in files:
@@ -140,7 +145,7 @@ if not all_data.empty:
             u_meal = st.selectbox("시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             u_price = st.text_input("금액", value="" if is_pending else row["금액"])
         u_note = st.text_input("비고", value="" if is_pending else row["비고"])
-        if st.button("💾 이 항목 저장", use_container_width=True): # 가로 꽉 채움
+        if st.button("💾 이 항목 저장", use_container_width=True):
             with st.spinner("저장 중..."):
                 row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": format_price(u_price), "비고": u_note, "상태": "완료"})
                 conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=pd.DataFrame(row_list)[COLUMNS])
@@ -162,19 +167,18 @@ if not all_data.empty:
     edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
     if checked_indices:
-        if st.button(f"🗑️ {len(checked_indices)}개 항목 삭제하기", type="primary", use_container_width=True): # 가로 꽉 채움
+        if st.button(f"🗑️ {len(checked_indices)}개 항목 삭제하기", type="primary", use_container_width=True):
             remaining_df = all_data.drop(all_data.index[[i-1 for i in checked_indices]]).reset_index(drop=True)
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
             st.cache_data.clear()
             st.rerun()
 
-# --- 4단계: 다운로드 (반반 배치 & 모바일 두 줄 대응) ---
+# --- 4단계: 다운로드 (PC 반반 / 모바일 한줄씩) ---
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"]
 if not done_df.empty:
     st.subheader("📥 4단계: 다운로드")
-    # gap="small"로 모바일에서 더 자연스럽게 배치되도록 설정
-    d1, d2 = st.columns(2, gap="small")
+    d1, d2 = st.columns(2)
     with d1:
         ex_out = io.BytesIO()
         excel_df = done_df.drop(columns=["사진데이터", "상태"], errors='ignore').copy()
@@ -182,5 +186,5 @@ if not done_df.empty:
         excel_df.to_excel(ex_out, index=False)
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
     with d2:
-        pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
+        pdf_fn = f"{datetime.now().month}월 영수증_한정민.pdf"
         st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf", use_container_width=True)
