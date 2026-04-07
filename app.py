@@ -14,11 +14,17 @@ st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# [수정] 정렬 우선순위 및 시간대 옵션
+# [정렬용] 우선순위 설정
 MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5}
 
 def get_meal_priority(meal_name):
     return MEAL_ORDER.get(meal_name, 6)
+
+# [출력용] 숫자를 제거하여 '중식', '석식'으로만 보이게 하는 함수
+def clean_meal_name(meal_name):
+    if "중식" in meal_name: return "중식"
+    if "석식" in meal_name: return "석식"
+    return meal_name
 
 def format_price(val):
     try:
@@ -41,7 +47,7 @@ def img_to_base64(image):
     image.save(buffered, format="JPEG", quality=30) 
     return base64.b64encode(buffered.getvalue()).decode()
 
-# [수정] PDF 배치 로직 (겹침 방지 및 사진 밑 정보 출력)
+# PDF 생성 로직 (출력 시 숫자가 제거된 명칭 사용)
 def create_photo_pdf(df):
     pdf = FPDF()
     font_path = "NanumGothic.ttf"
@@ -51,7 +57,6 @@ def create_photo_pdf(df):
     else:
         pdf.set_font("Arial", size=8)
 
-    # 요청하신 순서대로 정렬
     df['temp_p'] = df['시간대'].apply(get_meal_priority)
     df_sorted = df.sort_values(by=["날짜", "temp_p"]).reset_index(drop=True)
 
@@ -60,25 +65,21 @@ def create_photo_pdf(df):
         try:
             img_data = base64.b64decode(row["사진데이터"])
             temp_img = io.BytesIO(img_data)
-            
-            # x좌표: 왼쪽(10), 오른쪽(105)
-            x = 10 if i % 2 == 0 else 105
-            # y좌표: 사진 시작 위치를 위로 올림 (10, 145)
-            y = 10 if i % 4 < 2 else 145
-            
-            # 영수증 이미지 출력 (높이를 120mm로 제한하여 겹침 방지)
+            x, y = (10 if i % 2 == 0 else 105), (10 if i % 4 < 2 else 145)
             pdf.image(temp_img, x=x, y=y, w=90, h=120)
             
-            # [좌표 핵심 수정] 사진이 끝나는 y+122 지점에 텍스트 출력
             pdf.set_xy(x, y + 122)
             p_val = f"{row['금액']}원" if "원" not in str(row['금액']) else row['금액']
-            info_text = f"{row['날짜']} / {row['식당명']} / {row['시간대']} / {p_val}"
+            
+            # [수정] PDF 출력 시 숫자를 떼고 출력 (중식2 -> 중식)
+            display_meal = clean_meal_name(row['시간대'])
+            info_text = f"{row['날짜']} / {row['식당명']} / {display_meal} / {p_val}"
             
             pdf.cell(90, 10, info_text, ln=0, align='C')
         except: continue
     return bytes(pdf.output())
 
-# 1. 데이터 로드 및 정렬
+# 1. 데이터 로드
 COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
 try:
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
@@ -95,7 +96,7 @@ except:
 st.title("📑 법카 영수증 관리")
 
 # --- 1단계: 사진 업로드 ---
-with st.expander("📸 1단계: 사진 업로드", expanded=True):
+with st.expander("📸 1단계: 사진 업로드", expanded=False):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files and st.button("🚀 사진 전송"):
         new_list = []
@@ -117,27 +118,21 @@ st.divider()
 if not all_data.empty:
     st.subheader("💻 2단계: 개별 내용 수정")
     row_list = all_data.to_dict('records')
-    
     if "selected_index" not in st.session_state:
         st.session_state.selected_index = 0
         for i, r in enumerate(row_list):
             if r["상태"] == "대기":
                 st.session_state.selected_index = i
                 break
-    
     curr_idx = min(st.session_state.selected_index, len(row_list)-1)
-    idx = st.selectbox(
-        "항목 선택", range(len(row_list)), index=curr_idx,
-        format_func=lambda x: f"[{x+1}] {row_list[x]['날짜']} | {row_list[x]['식당명'] if row_list[x]['식당명'] else '미입력'} - {row_list[x]['상태']}"
-    )
-    
+    idx = st.selectbox("항목 선택", range(len(row_list)), index=curr_idx,
+                       format_func=lambda x: f"[{x+1}] {row_list[x]['날짜']} | {row_list[x]['식당명']}")
     if idx != st.session_state.selected_index:
         st.session_state.selected_index = idx
         st.rerun()
 
     row = row_list[idx]
     is_pending = (row["상태"] == "대기")
-    
     c1, c2 = st.columns([1, 2])
     with c1: 
         if row["사진데이터"]: st.image(base64.b64decode(row["사진데이터"]), width=300)
@@ -149,28 +144,20 @@ if not all_data.empty:
             u_date = st.date_input("날짜", d_val)
             u_name = st.text_input("식당명", value="" if is_pending else row["식당명"])
         with f2:
-            # [수정] 요청하신 5가지 시간대 옵션 적용
             meal_opts = ["조식", "중식", "중식2", "석식", "석식2"]
             u_meal = st.selectbox("시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             u_price = st.text_input("금액", value="" if is_pending else row["금액"])
         u_note = st.text_input("비고", value="" if is_pending else row["비고"])
-        
         if st.button("💾 이 항목 저장", use_container_width=True):
             with st.spinner("저장 중..."):
-                row_list[idx].update({
-                    "날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, 
-                    "금액": format_price(u_price), "비고": u_note, "상태": "완료"
-                })
+                row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": format_price(u_price), "비고": u_note, "상태": "완료"})
                 conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=pd.DataFrame(row_list)[COLUMNS])
                 st.cache_data.clear()
-                
-                next_idx = idx
                 for i in range(len(row_list)):
                     if row_list[i]["상태"] == "대기":
-                        next_idx = i
+                        st.session_state.selected_index = i
                         break
-                st.session_state.selected_index = next_idx
-                time.sleep(1)
+                time.sleep(0.5)
                 st.rerun()
 
 # --- 3단계: 내역 확인 및 삭제 ---
@@ -180,22 +167,12 @@ if not all_data.empty:
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
     edit_df["삭제체크"] = False
     edit_df.index = edit_df.index + 1 
-    
-    edited_data = st.data_editor(
-        edit_df, use_container_width=True,
-        column_config={"삭제체크": st.column_config.CheckboxColumn(label="삭제", default=False)},
-        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"]
-    )
-    
+    edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
-    real_indices = [i-1 for i in checked_indices]
-    
-    if real_indices and st.button(f"🗑️ {len(real_indices)}개 항목 일괄 삭제", type="primary", use_container_width=True):
-        remaining_df = all_data.drop(all_data.index[real_indices]).reset_index(drop=True)
+    if checked_indices and st.button("🗑️ 선택 삭제", type="primary"):
+        remaining_df = all_data.drop(all_data.index[[i-1 for i in checked_indices]]).reset_index(drop=True)
         conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
         st.cache_data.clear()
-        st.session_state.selected_index = 0
-        time.sleep(1)
         st.rerun()
 
 # --- 4단계: 다운로드 ---
@@ -207,6 +184,8 @@ if not done_df.empty:
     with d1:
         ex_out = io.BytesIO()
         excel_df = done_df.drop(columns=["사진데이터", "상태"], errors='ignore').copy()
+        # [수정] 엑셀 출력 시 숫자를 제거하여 '중식', '석식'으로 통일
+        excel_df["시간대"] = excel_df["시간대"].apply(clean_meal_name)
         excel_df.to_excel(ex_out, index=False)
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
     with d2:
