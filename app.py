@@ -22,12 +22,12 @@ def clean_meal_name(meal_name):
     if "석식" in meal_name: return "석식"
     return meal_name
 
-# [수정] 엑셀 숫자 오류 방지를 위해 콤마 제거 후 숫자형 반환
+# [수정] 엑셀 숫자 오류 방지를 위해 숫자형 반환
 def to_numeric(val):
     try:
         if not val or str(val).lower() in ['nan', '']: return 0
         return int(str(val).replace(',', ''))
-    except: return val
+    except: return 0
 
 def format_price(val):
     try:
@@ -173,44 +173,42 @@ if not all_data.empty:
             st.cache_data.clear()
             st.rerun()
 
-# --- [수정] 4단계: 다운로드 (엑셀 서식 지정 추가) ---
+# --- 4단계: 다운로드 ---
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"]
 if not done_df.empty:
     st.subheader("📥 4단계: 다운로드")
     d1, d2 = st.columns(2)
     with d1:
-        # [엑셀 서식 작업 시작]
         ex_out = io.BytesIO()
         excel_df = done_df.drop(columns=["사진데이터", "상태"], errors='ignore').copy()
         excel_df["시간대"] = excel_df["시간대"].apply(clean_meal_name)
-        excel_df["금액"] = excel_df["금액"].apply(to_numeric) # 텍스트->숫자 변환 (오류 방지)
+        excel_df["금액"] = excel_df["금액"].apply(to_numeric)
         
         with pd.ExcelWriter(ex_out, engine='xlsxwriter') as writer:
             excel_df.to_excel(writer, index=False, sheet_name='Sheet1')
             workbook  = writer.book
             worksheet = writer.sheets['Sheet1']
             
-            # [폰트 및 정렬 서식]
+            # 서식 정의 (맑은 고딕, 크기 10)
             base_fmt = workbook.add_format({'font_name': '맑은 고딕', 'font_size': 10, 'align': 'center', 'valign': 'vcenter', 'border': 1})
             left_fmt = workbook.add_format({'font_name': '맑은 고딕', 'font_size': 10, 'align': 'left', 'valign': 'vcenter', 'border': 1})
             price_fmt = workbook.add_format({'font_name': '맑은 고딕', 'font_size': 10, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '#,##0'})
-            note_fmt = workbook.add_format({'font_name': '맑은 고딕', 'font_size': 10, 'align': 'center', 'valign': 'vcenter', 'border': 1})
             usd_fmt = workbook.add_format({'font_name': '맑은 고딕', 'font_size': 10, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '$#,##0.00'})
 
-            # 전체 열 너비 및 기본 서식 적용
+            # 열별 서식 적용
             worksheet.set_column('A:A', 12, base_fmt) # 날짜
-            worksheet.set_column('B:B', 25, left_fmt) # 식당명 (왼쪽 정렬)
+            worksheet.set_column('B:B', 30, left_fmt) # 식당명 (왼쪽)
             worksheet.set_column('C:C', 10, base_fmt) # 시간대
-            worksheet.set_column('D:D', 12, price_fmt) # 금액 (숫자 형식)
-            worksheet.set_column('E:E', 15, base_fmt) # 비고
+            worksheet.set_column('D:D', 15, price_fmt) # 금액
+            worksheet.set_column('E:E', 20, base_fmt) # 비고
 
-            # [비고 열] 숫자일 경우 $ 표시 서식 개별 적용
+            # 비고란 특수 서식 ($ 표시)
             for r_idx, val in enumerate(excel_df['비고']):
                 try:
-                    clean_val = str(val).replace('$', '').replace(',', '')
-                    if clean_val.replace('.', '', 1).isdigit(): # 숫자라면
-                        worksheet.write(r_idx + 1, 4, float(clean_val), usd_fmt)
+                    c_val = str(val).replace('$', '').replace(',', '')
+                    if c_val.replace('.', '', 1).isdigit():
+                        worksheet.write(r_idx + 1, 4, float(c_val), usd_fmt)
                 except: pass
 
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
