@@ -181,7 +181,7 @@ if not done_df.empty:
         excel_df = done_df.drop(columns=["사진데이터", "상태"], errors='ignore').copy()
         excel_df["시간대"] = excel_df["시간대"].apply(clean_meal_name)
         excel_df.to_excel(ex_out, index=False)
-        st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx")
+        st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
     with d2:
         pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
-        st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf")
+        st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf", use_container_width=True)
