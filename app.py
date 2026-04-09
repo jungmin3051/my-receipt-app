@@ -52,9 +52,9 @@ def create_photo_pdf(df):
     font_path = "NanumGothic.ttf"
     if os.path.exists(font_path):
         pdf.add_font('Nanum', '', font_path, uni=True)
-        pdf.set_font('Nanum', size=8) 
+        pdf.set_font('Nanum', size=12) 
     else:
-        pdf.set_font("Arial", size=8)
+        pdf.set_font("Arial", size=12)
 
     df['temp_p'] = df['시간대'].apply(get_meal_priority)
     df_sorted = df.sort_values(by=["날짜", "temp_p"]).reset_index(drop=True)
