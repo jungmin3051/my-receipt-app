@@ -171,15 +171,39 @@ if not all_data.empty:
         st.rerun()
 
 # --- 4단계: 다운로드 ---
+# --- 4단계: 합계 및 다운로드 ---
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"]
+
 if not done_df.empty:
+    # --- [신규 추가] 합계 표시 섹션 ---
+    # 금액 문자열에서 콤마 제거 후 숫자로 합산
+    def parse_money(x):
+        try: return int(str(x).replace(',', ''))
+        except: return 0
+    
+    total_sum = done_df['금액'].apply(parse_money).sum()
+    
+    # 이쁘게 디자인된 합계 대시보드
+    st.markdown(
+        f"""
+        <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b; margin-bottom: 25px;">
+            <p style="margin: 0; font-size: 16px; color: #31333f; font-weight: bold;">💰 현재까지 완료된 항목 합계</p>
+            <h2 style="margin: 0; color: #ff4b4b;">{total_sum:,} 원</h2>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+    # ---------------------------------
+
     st.subheader("📥 4단계: 다운로드")
     d1, d2 = st.columns(2)
     with d1:
         ex_out = io.BytesIO()
         excel_df = done_df.drop(columns=["사진데이터", "상태"], errors='ignore').copy()
         excel_df["시간대"] = excel_df["시간대"].apply(clean_meal_name)
+        # 엑셀에도 숫자 형식으로 저장되도록 변환
+        excel_df["금액"] = excel_df["금액"].apply(parse_money)
         excel_df.to_excel(ex_out, index=False)
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
     with d2:
