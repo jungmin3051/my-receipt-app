@@ -156,6 +156,7 @@ if not all_data.empty:
                 st.rerun()
 
 # --- 3단계: 내역 확인 및 체크 삭제 ---
+# --- 3단계: 내역 확인 및 삭제 ---
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 삭제")
@@ -164,30 +165,30 @@ if not all_data.empty:
     edit_df.index = edit_df.index + 1 
     edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
     
-    # [합계 및 잔액 표시 섹션 - 3단계 바로 밑으로 이동]
+    # [합계 계산 로직]
     def parse_money(x):
         try: return int(str(x).replace(',', '').replace('원', ''))
         except: return 0
     
-    # '완료'된 항목들만 계산
     done_items = all_data[all_data["상태"] == "완료"]
     total_sum = done_items['금액'].apply(parse_money).sum()
     limit_amount = 500000
     remaining_amount = limit_amount - total_sum
     remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
 
+    # [수정] padding을 8px로 확 줄이고 글자는 큼직하게 유지
     st.markdown(
         f"""
-        <div style="background-color: #f8f9fb; padding: 20px; border-radius: 12px; border: 1px solid #e6e9ef; margin-top: 10px; margin-bottom: 20px;">
-            <div style="display: flex; justify-content: space-around; align-items: center; text-align: center;">
-                <div>
-                    <p style="margin: 0; font-size: 14px; color: #666;">💳 현재까지 사용한 금액</p>
-                    <h2 style="margin: 0; color: #31333f;">{total_sum:,} 원</h2>
+        <div style="background-color: #f8f9fb; padding: 8px 20px; border-radius: 8px; border: 1px solid #e6e9ef; margin-top: 5px; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-around; align-items: center; line-height: 1.1;">
+                <div style="text-align: center;">
+                    <span style="font-size: 13px; color: #666; display: block; margin-bottom: 2px;">💳 사용 금액</span>
+                    <span style="font-size: 20px; color: #31333f; font-weight: bold;">{total_sum:,} 원</span>
                 </div>
-                <div style="width: 2px; height: 50px; background-color: #e6e9ef;"></div>
-                <div>
-                    <p style="margin: 0; font-size: 14px; color: #666;">💰 남은 금액 (한도 50만)</p>
-                    <h2 style="margin: 0; color: {remain_color};">{remaining_amount:,} 원</h2>
+                <div style="width: 1px; height: 30px; background-color: #e6e9ef;"></div>
+                <div style="text-align: center;">
+                    <span style="font-size: 13px; color: #666; display: block; margin-bottom: 2px;">💰 남은 금액 (한도 50만)</span>
+                    <span style="font-size: 20px; color: {remain_color}; font-weight: bold;">{remaining_amount:,} 원</span>
                 </div>
             </div>
         </div>
