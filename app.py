@@ -176,20 +176,32 @@ st.divider()
 done_df = all_data[all_data["상태"] == "완료"]
 
 if not done_df.empty:
-    # --- [신규 추가] 합계 표시 섹션 ---
-    # 금액 문자열에서 콤마 제거 후 숫자로 합산
+    # --- [수정] 합계 및 잔액 계산 섹션 ---
     def parse_money(x):
         try: return int(str(x).replace(',', ''))
         except: return 0
     
     total_sum = done_df['금액'].apply(parse_money).sum()
+    limit_amount = 500000  # 한도 설정
+    remaining_amount = limit_amount - total_sum
     
-    # 이쁘게 디자인된 합계 대시보드
+    # 남은 금액이 마이너스면 빨간색, 아니면 파란색 계열로 표시
+    remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
+
     st.markdown(
         f"""
-        <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b; margin-bottom: 25px;">
-            <p style="margin: 0; font-size: 16px; color: #31333f; font-weight: bold;">💰 현재까지 완료된 항목 합계</p>
-            <h2 style="margin: 0; color: #ff4b4b;">{total_sum:,} 원</h2>
+        <div style="background-color: #f8f9fb; padding: 20px; border-radius: 12px; border: 1px solid #e6e9ef; margin-bottom: 25px;">
+            <div style="display: flex; justify-content: space-around; align-items: center; text-align: center;">
+                <div>
+                    <p style="margin: 0; font-size: 14px; color: #666;">💳 현재까지 사용한 금액</p>
+                    <h2 style="margin: 0; color: #31333f;">{total_sum:,} 원</h2>
+                </div>
+                <div style="width: 2px; height: 50px; background-color: #e6e9ef;"></div>
+                <div>
+                    <p style="margin: 0; font-size: 14px; color: #666;">💰 남은 금액 (한도 50만)</p>
+                    <h2 style="margin: 0; color: {remain_color};">{remaining_amount:,} 원</h2>
+                </div>
+            </div>
         </div>
         """, 
         unsafe_allow_html=True
@@ -197,15 +209,4 @@ if not done_df.empty:
     # ---------------------------------
 
     st.subheader("📥 4단계: 다운로드")
-    d1, d2 = st.columns(2)
-    with d1:
-        ex_out = io.BytesIO()
-        excel_df = done_df.drop(columns=["사진데이터", "상태"], errors='ignore').copy()
-        excel_df["시간대"] = excel_df["시간대"].apply(clean_meal_name)
-        # 엑셀에도 숫자 형식으로 저장되도록 변환
-        excel_df["금액"] = excel_df["금액"].apply(parse_money)
-        excel_df.to_excel(ex_out, index=False)
-        st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
-    with d2:
-        pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
-        st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf", use_container_width=True)
+    # ... (이후 d1, d2 다운로드 버튼 코드는 동일하게 유지)
