@@ -182,13 +182,13 @@ if not all_data.empty:
         <div style="background-color: #f8f9fb; padding: 8px 20px; border-radius: 8px; border: 1px solid #e6e9ef; margin-top: 10px; margin-bottom: 15px;">
             <div style="display: flex; justify-content: space-around; align-items: center; line-height: 1.1;">
                 <div style="text-align: center;">
-                    <span style="font-size: 13px; color: #666; display: block; margin-bottom: 2px;">💳 사용 금액</span>
-                    <span style="font-size: 20px; color: #31333f; font-weight: bold;">{total_sum:,} 원</span>
+                    <span style="font-size: 15px; color: #666; display: block; margin-bottom: 5px;">💳 사용 금액</span>
+                    <span style="font-size: 23px; color: #31333f; font-weight: bold;">{total_sum:,} 원</span>
                 </div>
                 <div style="width: 1px; height: 30px; background-color: #e6e9ef;"></div>
                 <div style="text-align: center;">
-                    <span style="font-size: 13px; color: #666; display: block; margin-bottom: 2px;">💰 남은 금액</span>
-                    <span style="font-size: 20px; color: {remain_color}; font-weight: bold;">{remaining_amount:,} 원</span>
+                    <span style="font-size: 15px; color: #666; display: block; margin-bottom: 5px;">💰 남은 금액</span>
+                    <span style="font-size: 23px; color: {remain_color}; font-weight: bold;">{remaining_amount:,} 원</span>
                 </div>
             </div>
         </div>
