@@ -182,17 +182,17 @@ if not all_data.empty:
     remaining_amount = limit_amount - total_sum
     remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
 
-    # [슬림한 합계창 디자인]
+    # [슬림하지만 글자는 크게 디자인]
     st.markdown(
         f"""
-        <div style="background-color: #f8f9fb; padding: 10px 20px; border-radius: 8px; border: 1px solid #e6e9ef; margin-top: 5px; margin-bottom: 15px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <span style="font-size: 13px; color: #666;">💳 사용: <b>{total_sum:,} 원</b></span>
+        <div style="background-color: #f8f9fb; padding: 5px 20px; border-radius: 8px; border: 1px solid #e6e9ef; margin-top: 5px; margin-bottom: 15px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; line-height: 1.2;">
+                <div style="display: flex; align-items: center; gap: 20px;">
+                    <span style="font-size: 16px; color: #31333f;">💳 사용: <b>{total_sum:,} 원</b></span>
                     <span style="color: #e6e9ef;">|</span>
-                    <span style="font-size: 13px; color: #666;">💰 잔액: <b style="color: {remain_color};">{remaining_amount:,} 원</b></span>
+                    <span style="font-size: 16px; color: #31333f;">💰 잔액: <b style="color: {remain_color};">{remaining_amount:,} 원</b></span>
                 </div>
-                <div style="font-size: 12px; color: #999; font-weight: bold;">한도: 500,000원</div>
+                <div style="font-size: 13px; color: #999; font-weight: bold;">한도: 500,000원</div>
             </div>
         </div>
         """, 
@@ -207,6 +207,11 @@ if not all_data.empty:
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
             st.cache_data.clear()
             st.rerun()
+
+
+
+
+
 # --- 4단계: 다운로드 ---
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"]
