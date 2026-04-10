@@ -92,7 +92,7 @@ st.title("📑 법카 영수증 관리")
 
 # --- [수정] 1단계: 사진 업로드 (expanded=True로 항상 열림) ---
 with st.expander("📸 1단계: 사진 업로드", expanded=True):
-    files = st.file_uploader("사진 선택", accept_multiple_files=True)
+    files = st.file_uploader("사진 선택", accept_multiple_files=True, capture="environment")
     if files and st.button("🚀 사진 전송"):
         new_list = []
         now = datetime.now()
