@@ -91,23 +91,37 @@ except:
 st.title("📑 법카 영수증 관리")
 
 # --- [수정] 1단계: 사진 업로드 (expanded=True로 항상 열림) ---
-with st.expander("📸 1단계: 사진 업로드", expanded=True):
-    files = st.file_uploader("사진 선택", accept_multiple_files=True, capture="environment")
-    if files and st.button("🚀 사진 전송"):
-        new_list = []
-        now = datetime.now()
-        for f in files:
-            try:
-                img_b64 = img_to_base64(Image.open(f))
-                new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", "금액": "", "비고": "", "사진데이터": img_b64, "상태": "대기"})
-            except Exception as e: st.error(f"오류: {e}")
-        if new_list:
-            updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
-            conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
-            st.cache_data.clear()
-            time.sleep(1)
-            st.rerun()
+with st.expander("📸 1단계: 영수증 촬영", expanded=True):
+    # camera_input은 모바일에서 후면 카메라를 우선적으로 띄웁니다.
+    img_file = st.camera_input("영수증을 화면에 맞춰 찍어주세요")
 
+    if img_file:
+        if st.button("🚀 사진 전송", use_container_width=True):
+            try:
+                # 캡처된 이미지를 base64로 변환
+                img_b64 = img_to_base64(Image.open(img_file))
+                
+                # 데이터 생성 (오늘 날짜 기본값)
+                new_data = {
+                    "날짜": datetime.now().strftime('%y-%m-%d'),
+                    "식당명": "", 
+                    "시간대": "중식", 
+                    "금액": "", 
+                    "비고": "", 
+                    "사진데이터": img_b64, 
+                    "상태": "대기"
+                }
+                
+                # 기존 데이터와 합쳐서 GSheet 업데이트
+                updated = pd.concat([all_data, pd.DataFrame([new_data])], ignore_index=True)
+                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
+                
+                st.success("영수증이 전송되었습니다! 2단계에서 내용을 수정해주세요.")
+                st.cache_data.clear()
+                time.sleep(1)
+                st.rerun()
+            except Exception as e:
+                st.error(f"전송 중 오류 발생: {e}")
 # --- 2단계: 개별 내용 수정 ---
 st.divider()
 if not all_data.empty:
