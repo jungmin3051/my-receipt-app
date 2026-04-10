@@ -156,52 +156,57 @@ if not all_data.empty:
                 st.rerun()
 
 # --- 3단계: 내역 확인 및 체크 삭제 ---
+# --- 3단계: 내역 확인 및 체크 삭제 ---
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 삭제")
+    
+    # 데이터 에디터 설정
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
     edit_df["삭제체크"] = False
     edit_df.index = edit_df.index + 1 
-    edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
+    edited_data = st.data_editor(
+        edit_df, 
+        use_container_width=True, 
+        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"]
+    )
     
-    # [합계 및 잔액 표시 섹션 - 3단계 바로 밑으로 이동]
+    # [합계 및 잔액 계산 로직]
     def parse_money(x):
         try: return int(str(x).replace(',', '').replace('원', ''))
         except: return 0
     
-    # '완료'된 항목들만 계산
     done_items = all_data[all_data["상태"] == "완료"]
     total_sum = done_items['금액'].apply(parse_money).sum()
     limit_amount = 500000
     remaining_amount = limit_amount - total_sum
     remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
 
+    # [슬림한 합계창 디자인]
     st.markdown(
         f"""
-        <div style="background-color: #f8f9fb; padding: 20px; border-radius: 12px; border: 1px solid #e6e9ef; margin-top: 10px; margin-bottom: 20px;">
-            <div style="display: flex; justify-content: space-around; align-items: center; text-align: center;">
-                <div>
-                    <p style="margin: 0; font-size: 14px; color: #666;">💳 현재까지 사용한 금액</p>
-                    <h2 style="margin: 0; color: #31333f;">{total_sum:,} 원</h2>
+        <div style="background-color: #f8f9fb; padding: 10px 20px; border-radius: 8px; border: 1px solid #e6e9ef; margin-top: 5px; margin-bottom: 15px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <span style="font-size: 13px; color: #666;">💳 사용: <b>{total_sum:,} 원</b></span>
+                    <span style="color: #e6e9ef;">|</span>
+                    <span style="font-size: 13px; color: #666;">💰 잔액: <b style="color: {remain_color};">{remaining_amount:,} 원</b></span>
                 </div>
-                <div style="width: 2px; height: 50px; background-color: #e6e9ef;"></div>
-                <div>
-                    <p style="margin: 0; font-size: 14px; color: #666;">💰 남은 금액 (한도 50만)</p>
-                    <h2 style="margin: 0; color: {remain_color};">{remaining_amount:,} 원</h2>
-                </div>
+                <div style="font-size: 12px; color: #999; font-weight: bold;">한도: 500,000원</div>
             </div>
         </div>
         """, 
         unsafe_allow_html=True
     )
 
+    # 삭제 버튼 로직
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
-    if checked_indices and st.button("🗑️ 선택 삭제", type="primary"):
-        remaining_df = all_data.drop(all_data.index[[i-1 for i in checked_indices]]).reset_index(drop=True)
-        conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
-        st.cache_data.clear()
-        st.rerun()
-
+    if checked_indices:
+        if st.button(f"🗑️ {len(checked_indices)}개 항목 삭제하기", type="primary", use_container_width=True):
+            remaining_df = all_data.drop(all_data.index[[i-1 for i in checked_indices]]).reset_index(drop=True)
+            conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
+            st.cache_data.clear()
+            st.rerun()
 # --- 4단계: 다운로드 ---
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"]
