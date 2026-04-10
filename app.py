@@ -179,7 +179,7 @@ if not all_data.empty:
     # [수정] padding을 8px로 확 줄이고 글자는 큼직하게 유지
     st.markdown(
         f"""
-        <div style="background-color: #f8f9fb; padding: 8px 20px; border-radius: 8px; border: 1px solid #e6e9ef; margin-top: 5px; margin-bottom: 10px;">
+        <div style="background-color: #f8f9fb; padding: 2px 10px; border-radius: 2px; border: 1px solid #e6e9ef; margin-top: 5px; margin-bottom: 10px;">
             <div style="display: flex; justify-content: space-around; align-items: center; line-height: 1.1;">
                 <div style="text-align: center;">
                     <span style="font-size: 13px; color: #666; display: block; margin-bottom: 2px;">💳 사용 금액</span>
