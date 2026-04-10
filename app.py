@@ -187,7 +187,7 @@ if not all_data.empty:
                 </div>
                 <div style="width: 1px; height: 30px; background-color: #e6e9ef;"></div>
                 <div style="text-align: center;">
-                    <span style="font-size: 13px; color: #666; display: block; margin-bottom: 2px;">💰 남은 금액 (한도 50만)</span>
+                    <span style="font-size: 13px; color: #666; display: block; margin-bottom: 2px;">💰 남은 금액</span>
                     <span style="font-size: 20px; color: {remain_color}; font-weight: bold;">{remaining_amount:,} 원</span>
                 </div>
             </div>
