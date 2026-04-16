@@ -170,7 +170,11 @@ if not all_data.empty:
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
     edit_df["삭제체크"] = False
     edit_df.index = edit_df.index + 1 
-    edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
+    edited_data = st.data_editor(
+        edit_df, 
+        use_container_width=True, 
+        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"]
+    )
     
     # [데이터 계산 로직]
     def parse_money(x):
@@ -198,10 +202,10 @@ if not all_data.empty:
     remaining_amount = limit_amount - total_sum
     remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
 
-    # 1. 상단 총액 요약 박스
+    # 1. 상단 총액 요약 박스 (디자인 유지)
     st.markdown(
         f"""
-        <div style="background-color: #f8f9fb; padding: 10px 20px; border-radius: 8px; border: 1px solid #e6e9ef; margin: 10px 0;">
+        <div style="background-color: #f8f9fb; padding: 12px 20px; border-radius: 10px; border: 1px solid #e6e9ef; margin: 10px 0;">
             <div style="display: flex; justify-content: space-around; align-items: center;">
                 <div style="text-align: center;">
                     <span style="font-size: 14px; color: #666;">💳 총 사용 금액</span><br>
@@ -217,7 +221,7 @@ if not all_data.empty:
         """, unsafe_allow_html=True
     )
 
-    # 2. 10일 단위 구간별 테이블 (오류 방지를 위해 문자열 결합 방식 수정)
+    # 2. 10일 단위 구간별 테이블 (깔끔하게 수정)
     periods = ["1~10일", "11~20일", "21~말일"]
     rows_html = ""
     for p in periods:
@@ -226,29 +230,31 @@ if not all_data.empty:
         diff_color = "#ff4b4b" if diff < 0 else "#1f77b4"
         rows_html += f"""
         <tr style="border-bottom: 1px solid #eee;">
-            <td style="padding: 8px; background-color: #fff;">{p}</td>
-            <td style="padding: 8px; background-color: #fff;">₩ {usage:,}</td>
-            <td style="padding: 8px; background-color: #fff; color: {diff_color}; font-weight: bold;">₩ {diff:,}</td>
+            <td style="padding: 10px; background-color: #fff; border: 1px solid #eee;">{p}</td>
+            <td style="padding: 10px; background-color: #fff; border: 1px solid #eee;">₩ {usage:,}</td>
+            <td style="padding: 10px; background-color: #fff; border: 1px solid #eee; color: {diff_color}; font-weight: bold;">₩ {diff:,}</td>
         </tr>
         """
 
     st.markdown(
         f"""
-        <table style="width:100%; border-collapse: collapse; text-align: center; border: 1px solid #e6e9ef; font-size: 14px;">
-            <thead>
-                <tr style="background-color: #f1f3f6;">
+        <table style="width:100%; border-collapse: collapse; text-align: center; border: 1px solid #e6e9ef; font-size: 14px; margin-top: 5px;">
+            <thead style="background-color: #f1f3f6;">
+                <tr>
                     <th style="padding: 10px; border: 1px solid #e6e9ef;">구간</th>
                     <th style="padding: 10px; border: 1px solid #e6e9ef;">사용 금액</th>
                     <th style="padding: 10px; border: 1px solid #e6e9ef;">13만원 대비 잔액</th>
                 </tr>
             </thead>
-           
+            <tbody>
+                {rows_html}
+            </tbody>
         </table>
         <div style="margin-bottom: 20px;"></div>
         """, unsafe_allow_html=True
     )
 
-    # 삭제 버튼
+    # 삭제 버튼 로직
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
     if checked_indices:
         if st.button(f"🗑️ {len(checked_indices)}개 항목 삭제하기", type="primary", use_container_width=True):
@@ -256,7 +262,6 @@ if not all_data.empty:
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
             st.cache_data.clear()
             st.rerun()
-
 
 
 
