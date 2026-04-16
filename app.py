@@ -163,23 +163,10 @@ if not all_data.empty:
 
 
 
-import datetime
-
 # --- 3단계: 내역 확인 및 삭제 ---
 if not all_data.empty:
     st.divider()
-    
-    # 1. 상단 레이아웃: 제목과 오늘 날짜 배치
-    col_title, col_date = st.columns([2, 1])
-    with col_title:
-        st.subheader("👀 3단계: 내역 확인 및 삭제")
-    with col_date:
-        # 오늘 날짜와 요일 계산
-        now = datetime.datetime.now()
-        weekday_list = ['월', '화', '수', '목', '금', '토', '일']
-        today_str = f"📅 {now.strftime('%Y-%m-%d')} ({weekday_list[now.weekday()]})"
-        # 우측 정렬로 표시
-        st.markdown(f"<p style='text-align:right; color:#666; font-size:16px; margin-top:10px;'><b>{today_str}</b></p>", unsafe_allow_html=True)
+    st.subheader("👀 3단계: 내역 확인 및 삭제")
     
     # 데이터 정리 및 표 출력
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
