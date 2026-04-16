@@ -8,7 +8,7 @@ from PIL import Image, ImageOps
 from fpdf import FPDF
 import time
 import os
-import datetime
+
 
 # 0. 기본 설정
 st.set_page_config(page_title="법카 영수증 관리", layout="wide")
