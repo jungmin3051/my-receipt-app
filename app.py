@@ -15,7 +15,7 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # [정렬용] 우선순위 설정
-MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5}
+MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5 , "회식": 6}
 
 def get_meal_priority(meal_name):
     return MEAL_ORDER.get(meal_name, 6)
@@ -139,7 +139,7 @@ if not all_data.empty:
             u_date = st.date_input("날짜", d_val)
             u_name = st.text_input("식당명", value="" if is_pending else row["식당명"])
         with f2:
-            meal_opts = ["조식", "중식", "중식2", "석식", "석식2"]
+            meal_opts = ["조식", "중식", "중식2", "석식", "석식2", "회식"]
             u_meal = st.selectbox("시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             u_price = st.text_input("금액", value="" if is_pending else row["금액"])
         u_note = st.text_input("비고", value="" if is_pending else row["비고"])
