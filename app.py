@@ -166,43 +166,27 @@ if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 삭제")
 
-    # [좌표 고정] CSS로 '삭제체크' 헤더 바로 옆으로 체크박스 강제 이동
-    st.markdown("""
-        <style>
-        /* 체크박스 전체 컨테이너를 표 헤더 높이에 맞춰 강제 배치 */
-        div[data-testid="stHorizontalBlock"]:has(input[aria-label=""]) {
-            position: relative;
-            margin-bottom: -50px; /* 표 위로 겹치게 올림 */
-            z-index: 100;
-        }
-        /* 네모칸만 따로 떼서 '삭제체크' 옆으로 밀기 */
-        div[data-testid="stHorizontalBlock"] .stCheckbox {
-            position: absolute;
-            right: 25px; /* 오른쪽 끝에서 헤더 글자 옆으로 간격 조절 */
-            top: 15px;
-        }
-        </style>
-    """, unsafe_allow_html=True)
+    # [수정] 표의 '삭제체크' 열 위치와 수직으로 맞추기 위해 컬럼 비율 조정
+    # 오른쪽 끝으로 네모칸을 보내기 위해 왼쪽 여백(9.5)을 크게 잡았습니다.
+    cols = st.columns([9.5, 0.5]) 
+    with cols[1]:
+        # 글자 없이 네모칸만 딱! 
+        select_all = st.checkbox("", key="final_square_only")
 
-    # 실제 체크박스 생성 (표 위에 겹쳐서 배치됨)
-    _, col_check = st.columns([9.3, 0.7]) 
-    with col_check:
-        select_all = st.checkbox("", key="final_absolute_sel")
-
-    # 데이터 및 삭제체크 연동
+    # 데이터 준비 (네모칸 상태 연동)
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
     edit_df["삭제체크"] = select_all 
     edit_df.index = edit_df.index + 1 
 
-    # 데이터 에디터 출력
+    # 데이터 에디터 (표)
     edited_data = st.data_editor(
         edit_df, 
         use_container_width=True, 
         disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"],
-        key="main_editor_v4"
+        key="main_editor_v5"
     )
     
-    # [계산 및 테이블 로직은 이전과 동일하게 유지]
+    # [계산 및 요약 로직 - 기존 디자인 유지]
     def parse_money(x):
         try: return int(str(x).replace(',', '').replace('원', ''))
         except: return 0
@@ -210,13 +194,14 @@ if not all_data.empty:
     done_items = all_data[all_data["상태"] == "완료"].copy()
     done_items['int_amount'] = done_items['금액'].apply(parse_money)
     
-    # 요약 박스 및 테이블 (요청하신 순서 반영)
     total_sum = done_items['int_amount'].sum()
     remain = 500000 - total_sum
     r_color = "#ff4b4b" if remain < 0 else "#1f77b4"
 
+    # 요약 박스
     st.markdown(f"<div style='background-color:#f8f9fb;padding:12px;border-radius:10px;border:1px solid #e6e9ef;margin:10px 0;'><div style='display:flex;justify-content:space-around;align-items:center;'> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💳 총 사용 금액</span><br><span style='font-size:22px;font-weight:bold;'>{total_sum:,} 원</span></div> <div style='width:1px;height:35px;background-color:#e6e9ef;'></div> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💰 총 남은 금액</span><br><span style='font-size:22px;color:{r_color};font-weight:bold;'>{remain:,} 원</span></div> </div></div>", unsafe_allow_html=True)
 
+    # 구간 테이블 (11-20 -> 21-말일 -> 1-10 순서)
     def get_day_group(date_str):
         try:
             day = int(str(date_str).split('-')[-1])
@@ -237,7 +222,7 @@ if not all_data.empty:
     t_html += "</tbody></table><div style='margin-bottom:20px;'></div>"
     st.markdown(t_html, unsafe_allow_html=True)
 
-    # 일괄 삭제 버튼
+    # 삭제 버튼
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
     if checked_indices:
         if st.button(f"🗑️ {len(checked_indices)}개 항목 일괄 삭제", type="primary", use_container_width=True):
