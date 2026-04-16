@@ -219,7 +219,7 @@ if not all_data.empty:
         table_html += f"<tr><td style='padding:10px;border:1px solid #eee;background-color:#fff;'>{p}</td><td style='padding:10px;border:1px solid #eee;background-color:#fff;'>₩ {usage:,}</td><td style='padding:10px;border:1px solid #eee;background-color:#fff;color:{d_color};font-weight:bold;'>₩ {diff:,}</td></tr>"
     
     # [회식] 전용 줄 추가 (시간대 '회식'인 금액 합산, 한도 10만원 기준)
-    table_html += f"<tr style='background-color:#fff5f5;'><td style='padding:10px;border:1px solid #eee;font-weight:bold;'>🍻 회식</td><td style='padding:10px;border:1px solid #eee;font-weight:bold;'>₩ {dinner_usage:,}</td><td style='padding:10px;border:1px solid #eee;color:{dinner_color};font-weight:bold;'>₩ {dinner_diff:,}</td></tr>"
+    table_html += f"<tr><td>🍻 회식</td><td style='padding:10px;border:1px solid #eee;>₩ {dinner_usage:,}</td><td style='padding:10px;border:1px solid #eee;color:{dinner_color};font-weight:bold;'>₩ {dinner_diff:,}</td></tr>"
     
     table_html += "</tbody></table><div style='margin-bottom:20px;'></div>"
     st.markdown(table_html, unsafe_allow_html=True)
