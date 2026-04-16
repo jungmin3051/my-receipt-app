@@ -166,27 +166,26 @@ if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 삭제")
 
-    # 데이터 준비
+    # [수정] 표 바로 위에 체크박스 네모만 배치 (에러 방지를 위해 컬럼 구조 단순화)
+    c1, c2 = st.columns([0.94, 0.06])
+    with c2:
+        # 글자 없이 네모만 노출
+        select_all = st.checkbox("", key="master_check_v1")
+
+    # 데이터 복사 및 체크박스 상태 강제 주입
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
+    edit_df["삭제체크"] = select_all  # 상단 네모와 연동
     edit_df.index = edit_df.index + 1 
 
-    # [수정] 표 헤더 자체에 체크박스 기능을 넣기 위해 column_config 설정
-    # '삭제체크' 헤더를 클릭하면 전체 선택/해제가 동작하도록 구현
+    # 표 출력 (KeyError 방지를 위해 원래 열 이름 그대로 유지)
     edited_data = st.data_editor(
         edit_df,
         use_container_width=True,
-        column_config={
-            "삭제체크": st.column_config.CheckboxColumn(
-                "삭제체크 ✅", # 헤더 이름 옆에 체크 표시 추가
-                help="전체 선택하려면 클릭하세요",
-                default=False,
-            )
-        },
         disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"],
-        key="main_editor_final_v1"
+        key="main_table_final"
     )
     
-    # [계산 및 디자인 로직 - 기존 선임님 커스텀 유지]
+    # [정산 로직 및 테이블 디자인 - 선임님 커스텀 버전]
     def parse_money(x):
         try: return int(str(x).replace(',', '').replace('원', ''))
         except: return 0
@@ -201,7 +200,7 @@ if not all_data.empty:
     # 상단 요약 바
     st.markdown(f"<div style='background-color:#f8f9fb;padding:12px;border-radius:10px;border:1px solid #e6e9ef;margin:10px 0;'><div style='display:flex;justify-content:space-around;align-items:center;'> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💳 총 사용 금액</span><br><span style='font-size:22px;font-weight:bold;'>{total_sum:,} 원</span></div> <div style='width:1px;height:35px;background-color:#e6e9ef;'></div> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💰 총 남은 금액</span><br><span style='font-size:22px;color:{r_color};font-weight:bold;'>{remain:,} 원</span></div> </div></div>", unsafe_allow_html=True)
 
-    # 구간 테이블 (순서: 11~20 -> 21~말 -> 1~10)
+    # 구간 테이블 (11~20 -> 21~말 -> 1~10 순서 고정)
     def get_day_group(date_str):
         try:
             day = int(str(date_str).split('-')[-1])
@@ -222,15 +221,17 @@ if not all_data.empty:
     t_html += "</tbody></table><div style='margin-bottom:20px;'></div>"
     st.markdown(t_html, unsafe_allow_html=True)
 
-    # 삭제 실행 버튼
-    checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
-    if checked_indices:
-        if st.button(f"🗑️ {len(checked_indices)}개 항목 일괄 삭제", type="primary", use_container_width=True):
-            remaining_df = all_data.drop(all_data.index[[i-1 for i in checked_indices]]).reset_index(drop=True)
-            conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
-            st.cache_data.clear()
-            st.rerun()
-
+    # 삭제 로직 (KeyError 해결)
+    if "삭제체크" in edited_data.columns:
+        checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
+        if checked_indices:
+            if st.button(f"🗑️ {len(checked_indices)}개 항목 일괄 삭제", type="primary", use_container_width=True):
+                # 인덱스 보정 후 삭제 처리
+                actual_ids = [i-1 for i in checked_indices]
+                remaining_df = all_data.drop(all_data.index[actual_ids]).reset_index(drop=True)
+                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
+                st.cache_data.clear()
+                st.rerun()
 
 
 
