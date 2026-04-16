@@ -165,27 +165,12 @@ if not all_data.empty:
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 삭제")
-
-    # [수정] 표 바로 위에 체크박스 네모만 배치 (에러 방지를 위해 컬럼 구조 단순화)
-    c1, c2 = st.columns([0.94, 0.06])
-    with c2:
-        # 글자 없이 네모만 노출
-        select_all = st.checkbox("", key="master_check_v1")
-
-    # 데이터 복사 및 체크박스 상태 강제 주입
-    edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
-    edit_df["삭제체크"] = select_all  # 상단 네모와 연동
-    edit_df.index = edit_df.index + 1 
-
-    # 표 출력 (KeyError 방지를 위해 원래 열 이름 그대로 유지)
-    edited_data = st.data_editor(
-        edit_df,
-        use_container_width=True,
-        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"],
-        key="main_table_final"
-    )
     
-    # [정산 로직 및 테이블 디자인 - 선임님 커스텀 버전]
+    edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
+    edit_df["삭제체크"] = False
+    edit_df.index = edit_df.index + 1 
+    edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
+    
     def parse_money(x):
         try: return int(str(x).replace(',', '').replace('원', ''))
         except: return 0
@@ -193,14 +178,6 @@ if not all_data.empty:
     done_items = all_data[all_data["상태"] == "완료"].copy()
     done_items['int_amount'] = done_items['금액'].apply(parse_money)
     
-    total_sum = done_items['int_amount'].sum()
-    remain = 500000 - total_sum
-    r_color = "#ff4b4b" if remain < 0 else "#1f77b4"
-
-    # 상단 요약 바
-    st.markdown(f"<div style='background-color:#f8f9fb;padding:12px;border-radius:10px;border:1px solid #e6e9ef;margin:10px 0;'><div style='display:flex;justify-content:space-around;align-items:center;'> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💳 총 사용 금액</span><br><span style='font-size:22px;font-weight:bold;'>{total_sum:,} 원</span></div> <div style='width:1px;height:35px;background-color:#e6e9ef;'></div> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💰 총 남은 금액</span><br><span style='font-size:22px;color:{r_color};font-weight:bold;'>{remain:,} 원</span></div> </div></div>", unsafe_allow_html=True)
-
-    # 구간 테이블 (11~20 -> 21~말 -> 1~10 순서 고정)
     def get_day_group(date_str):
         try:
             day = int(str(date_str).split('-')[-1])
@@ -210,30 +187,41 @@ if not all_data.empty:
         except: return "기타"
 
     done_items['구간'] = done_items['날짜'].apply(get_day_group)
-    p_sum = done_items.groupby('구간')['int_amount'].sum().to_dict()
+    periodic_sum = done_items.groupby('구간')['int_amount'].sum().to_dict()
+    
+    total_sum = done_items['int_amount'].sum()
+    limit_amount = 500000
+    remaining_amount = limit_amount - total_sum
+    remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
 
-    t_html = "<table style='width:100%;border-collapse:collapse;text-align:center;border:1px solid #e6e9ef;font-size:14px;'><thead style='background-color:#f1f3f6;'><tr><th style='padding:10px;border:1px solid #e6e9ef;'>구간</th><th style='padding:10px;border:1px solid #e6e9ef;'>사용 금액</th><th style='padding:10px;border:1px solid #e6e9ef;'>13만원 대비 잔액</th></tr></thead><tbody>"
-    for p in ["11~20일", "21~말일", "1~10일"]:
-        u = p_sum.get(p, 0)
-        d = 130000 - u
-        dc = "#ff4b4b" if d < 0 else "#1f77b4"
-        t_html += f"<tr><td style='padding:10px;border:1px solid #eee;'>{p}</td><td style='padding:10px;border:1px solid #eee;'>₩ {u:,}</td><td style='padding:10px;border:1px solid #eee;color:{dc};font-weight:bold;'>₩ {d:,}</td></tr>"
-    t_html += "</tbody></table><div style='margin-bottom:20px;'></div>"
-    st.markdown(t_html, unsafe_allow_html=True)
+    # 1. 상단 총액 요약 (한 줄 압축)
+    summary_html = f"<div style='background-color:#f8f9fb;padding:12px;border-radius:10px;border:1px solid #e6e9ef;margin:10px 0;'><div style='display:flex;justify-content:space-around;align-items:center;'> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💳 총 사용 금액</span><br><span style='font-size:22px;font-weight:bold;'>{total_sum:,} 원</span></div> <div style='width:1px;height:35px;background-color:#e6e9ef;'></div> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💰 총 남은 금액</span><br><span style='font-size:22px;color:{remain_color};font-weight:bold;'>{remaining_amount:,} 원</span></div> </div></div>"
+    st.markdown(summary_html, unsafe_allow_html=True)
 
-    # 삭제 로직 (KeyError 해결)
-    if "삭제체크" in edited_data.columns:
-        checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
-        if checked_indices:
-            if st.button(f"🗑️ {len(checked_indices)}개 항목 일괄 삭제", type="primary", use_container_width=True):
-                # 인덱스 보정 후 삭제 처리
-                actual_ids = [i-1 for i in checked_indices]
-                remaining_df = all_data.drop(all_data.index[actual_ids]).reset_index(drop=True)
-                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
-                st.cache_data.clear()
-                st.rerun()
+    # 2. 구간 테이블 (선임님이 요청하신 순서: 11~20일 -> 21~말일 -> 1~10일)
+    table_html = "<table style='width:100%;border-collapse:collapse;text-align:center;border:1px solid #e6e9ef;font-size:14px;'>"
+    table_html += "<thead style='background-color:#f1f3f6;'><tr><th style='padding:10px;border:1px solid #e6e9ef;'>구간</th><th style='padding:10px;border:1px solid #e6e9ef;'>사용 금액</th><th style='padding:10px;border:1px solid #e6e9ef;'>13만원 대비 잔액</th></tr></thead><tbody>"
+    
+    # 요청하신 순서대로 리스트 구성
+    custom_order = ["11~20일", "21~말일", "1~10일"]
+    
+    for p in custom_order:
+        usage = periodic_sum.get(p, 0)
+        diff = 130000 - usage
+        d_color = "#ff4b4b" if diff < 0 else "#1f77b4"
+        table_html += f"<tr><td style='padding:10px;border:1px solid #eee;background-color:#fff;'>{p}</td><td style='padding:10px;border:1px solid #eee;background-color:#fff;'>₩ {usage:,}</td><td style='padding:10px;border:1px solid #eee;background-color:#fff;color:{d_color};font-weight:bold;'>₩ {diff:,}</td></tr>"
+    
+    table_html += "</tbody></table><div style='margin-bottom:20px;'></div>"
+    st.markdown(table_html, unsafe_allow_html=True)
 
-
+    # 삭제 버튼 로직
+    checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
+    if checked_indices:
+        if st.button(f"🗑️ {len(checked_indices)}개 항목 삭제하기", type="primary", use_container_width=True):
+            remaining_df = all_data.drop(all_data.index[[i-1 for i in checked_indices]]).reset_index(drop=True)
+            conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
+            st.cache_data.clear()
+            st.rerun()
 
 
 
