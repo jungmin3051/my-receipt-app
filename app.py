@@ -242,9 +242,7 @@ if not all_data.empty:
                     <th style="padding: 10px; border: 1px solid #e6e9ef;">13만원 대비 잔액</th>
                 </tr>
             </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
+           
         </table>
         <div style="margin-bottom: 20px;"></div>
         """, unsafe_allow_html=True
