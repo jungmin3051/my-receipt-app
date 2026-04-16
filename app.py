@@ -166,7 +166,7 @@ if not all_data.empty:
 # --- 3단계: 내역 확인 및 삭제 ---
 if not all_data.empty:
     st.divider()
-    st.subheader("👀 3단계: 내역 확인 및 삭제")
+    st.subheader(f"👀 3단계: 내역 확인 및 삭제 :blue[({today_str})]")
     
     # 데이터 정리 및 표 출력
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
