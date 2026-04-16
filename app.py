@@ -161,7 +161,7 @@ if not all_data.empty:
 
 
 
-# --- 3단계: 내역 확인 및 삭제 (최종 수정 버전) ---
+# --- 3단계: 내역 확인 및 삭제 ---
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계: 내역 확인 및 삭제")
@@ -194,24 +194,27 @@ if not all_data.empty:
     remaining_amount = limit_amount - total_sum
     remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
 
-    # 상단 총액 요약 (한 줄로 압축)
+    # 1. 상단 총액 요약 (한 줄 압축)
     summary_html = f"<div style='background-color:#f8f9fb;padding:12px;border-radius:10px;border:1px solid #e6e9ef;margin:10px 0;'><div style='display:flex;justify-content:space-around;align-items:center;'> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💳 총 사용 금액</span><br><span style='font-size:22px;font-weight:bold;'>{total_sum:,} 원</span></div> <div style='width:1px;height:35px;background-color:#e6e9ef;'></div> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💰 총 남은 금액</span><br><span style='font-size:22px;color:{remain_color};font-weight:bold;'>{remaining_amount:,} 원</span></div> </div></div>"
     st.markdown(summary_html, unsafe_allow_html=True)
 
-    # 구간 테이블 (줄바꿈 없이 한 줄로 조립)
+    # 2. 구간 테이블 (선임님이 요청하신 순서: 11~20일 -> 21~말일 -> 1~10일)
     table_html = "<table style='width:100%;border-collapse:collapse;text-align:center;border:1px solid #e6e9ef;font-size:14px;'>"
     table_html += "<thead style='background-color:#f1f3f6;'><tr><th style='padding:10px;border:1px solid #e6e9ef;'>구간</th><th style='padding:10px;border:1px solid #e6e9ef;'>사용 금액</th><th style='padding:10px;border:1px solid #e6e9ef;'>13만원 대비 잔액</th></tr></thead><tbody>"
     
-    for p in ["1~10일", "11~20일", "21~말일"]:
+    # 요청하신 순서대로 리스트 구성
+    custom_order = ["11~20일", "21~말일", "1~10일"]
+    
+    for p in custom_order:
         usage = periodic_sum.get(p, 0)
         diff = 130000 - usage
         d_color = "#ff4b4b" if diff < 0 else "#1f77b4"
-        table_html += f"<tr><td style='padding:10px;border:1px solid #eee;'>{p}</td><td style='padding:10px;border:1px solid #eee;'>₩ {usage:,}</td><td style='padding:10px;border:1px solid #eee;color:{d_color};font-weight:bold;'>₩ {diff:,}</td></tr>"
+        table_html += f"<tr><td style='padding:10px;border:1px solid #eee;background-color:#fff;'>{p}</td><td style='padding:10px;border:1px solid #eee;background-color:#fff;'>₩ {usage:,}</td><td style='padding:10px;border:1px solid #eee;background-color:#fff;color:{d_color};font-weight:bold;'>₩ {diff:,}</td></tr>"
     
     table_html += "</tbody></table><div style='margin-bottom:20px;'></div>"
     st.markdown(table_html, unsafe_allow_html=True)
 
-    # 삭제 버튼
+    # 삭제 버튼 로직
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
     if checked_indices:
         if st.button(f"🗑️ {len(checked_indices)}개 항목 삭제하기", type="primary", use_container_width=True):
