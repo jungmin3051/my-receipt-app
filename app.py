@@ -8,6 +8,7 @@ from PIL import Image, ImageOps
 from fpdf import FPDF
 import time
 import os
+import datetime
 
 # 0. 기본 설정
 st.set_page_config(page_title="법카 영수증 관리", layout="wide")
@@ -161,7 +162,6 @@ if not all_data.empty:
 
 
 
-import datetime
 
 # --- 3단계: 내역 확인 및 삭제 ---
 if not all_data.empty:
