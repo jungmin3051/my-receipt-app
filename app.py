@@ -202,7 +202,7 @@ if not all_data.empty:
     remaining_amount = limit_amount - total_sum
     remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
 
-    # 1. 상단 총액 요약 박스 (디자인 유지)
+    # 1. 상단 총액 요약 박스 (선임님이 좋아하신 디자인)
     st.markdown(
         f"""
         <div style="background-color: #f8f9fb; padding: 12px 20px; border-radius: 10px; border: 1px solid #e6e9ef; margin: 10px 0;">
@@ -221,14 +221,14 @@ if not all_data.empty:
         """, unsafe_allow_html=True
     )
 
-    # 2. 10일 단위 구간별 테이블 (깔끔하게 수정)
+    # 2. 10일 단위 구간별 테이블 (찌꺼기 절대 안 남는 조립 방식)
     periods = ["1~10일", "11~20일", "21~말일"]
-    rows_html = ""
+    rows_content = ""
     for p in periods:
         usage = periodic_sum.get(p, 0)
         diff = 130000 - usage
         diff_color = "#ff4b4b" if diff < 0 else "#1f77b4"
-        rows_html += f"""
+        rows_content += f"""
         <tr style="border-bottom: 1px solid #eee;">
             <td style="padding: 10px; background-color: #fff; border: 1px solid #eee;">{p}</td>
             <td style="padding: 10px; background-color: #fff; border: 1px solid #eee;">₩ {usage:,}</td>
@@ -236,23 +236,23 @@ if not all_data.empty:
         </tr>
         """
 
-    st.markdown(
-        f"""
-        <table style="width:100%; border-collapse: collapse; text-align: center; border: 1px solid #e6e9ef; font-size: 14px; margin-top: 5px;">
-            <thead style="background-color: #f1f3f6;">
-                <tr>
-                    <th style="padding: 10px; border: 1px solid #e6e9ef;">구간</th>
-                    <th style="padding: 10px; border: 1px solid #e6e9ef;">사용 금액</th>
-                    <th style="padding: 10px; border: 1px solid #e6e9ef;">13만원 대비 잔액</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-        <div style="margin-bottom: 20px;"></div>
-        """, unsafe_allow_html=True
-    )
+    # 전체 테이블 합치기 (이 구조가 틀어지면 찌꺼기가 남습니다)
+    final_table_html = f"""
+    <table style="width:100%; border-collapse: collapse; text-align: center; border: 1px solid #e6e9ef; font-size: 14px; margin-top: 5px;">
+        <thead style="background-color: #f1f3f6;">
+            <tr>
+                <th style="padding: 10px; border: 1px solid #e6e9ef;">구간</th>
+                <th style="padding: 10px; border: 1px solid #e6e9ef;">사용 금액</th>
+                <th style="padding: 10px; border: 1px solid #e6e9ef;">13만원 대비 잔액</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_content}
+        </tbody>
+    </table>
+    <div style="margin-bottom: 20px;"></div>
+    """
+    st.markdown(final_table_html, unsafe_allow_html=True)
 
     # 삭제 버튼 로직
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
@@ -262,7 +262,6 @@ if not all_data.empty:
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
             st.cache_data.clear()
             st.rerun()
-
 
 
 
