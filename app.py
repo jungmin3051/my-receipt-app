@@ -244,33 +244,6 @@ if not all_data.empty:
             st.cache_data.clear()
             st.rerun()
 
-# --- 4단계: 다운로드 ---
-st.divider()
-done_df = all_data[all_data["상태"] == "완료"]
-if not done_df.empty:
-    st.subheader("📥 4단계: 다운로드")
-    d1, d2 = st.columns(2)
-    with d1:
-        # [수정] Excel 엔진 오류 방지를 위해 engine='xlsxwriter' 제거하거나 설치 여부 확인 필요
-        # 기본적으로 오픈피와이엑셀(openpyxl)을 사용하도록 유도
-        ex_out = io.BytesIO()
-        excel_df = done_df.drop(columns=["사진데이터", "상태"], errors='ignore').copy()
-        excel_df["시간대"] = excel_df["시간대"].apply(clean_meal_name)
-        
-        try:
-            # 엑셀 엔진을 명시하지 않거나 설치된 라이브러리에 맞춰 자동 선택되게 함
-            excel_df.to_excel(ex_out, index=False)
-        except:
-            # 위에서 오류날 경우 기본 엔진 시도
-            excel_df.to_excel(ex_out, index=False, engine='openpyxl')
-            
-        st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
-    with d2:
-        pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
-        st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf", use_container_width=True)
-
-
-
 
 
 
