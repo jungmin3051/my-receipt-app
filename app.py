@@ -91,8 +91,8 @@ except:
 
 st.title("📑 법카 영수증 관리")
 
-# --- [수정] 1단계: 사진 업로드 (expanded=True로 항상 열림) ---
-with st.expander("📸 1단계: 사진 업로드", expanded=True):
+# --- [수정] 1단계 : 사진 업로드 (expanded=True로 항상 열림) ---
+with st.expander("📸 1단계 : 사진 업로드", expanded=True):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files and st.button("🚀 사진 전송"):
         new_list = []
@@ -112,7 +112,7 @@ with st.expander("📸 1단계: 사진 업로드", expanded=True):
 # --- 2단계: 개별 내용 수정 ---
 st.divider()
 if not all_data.empty:
-    st.subheader("💻 2단계: 개별 내용 수정")
+    st.subheader("💻 2단계 : 개별 내용 수정")
     row_list = all_data.to_dict('records')
     if "selected_index" not in st.session_state:
         st.session_state.selected_index = 0
@@ -166,7 +166,7 @@ if not all_data.empty:
 # --- 3단계: 내역 확인 및 삭제 ---
 if not all_data.empty:
     st.divider()
-    st.subheader("👀 3단계: 내역 확인 및 삭제")
+    st.subheader("👀 3단계 : 내역 확인 및 삭제")
 
 
 
@@ -249,7 +249,7 @@ if not all_data.empty:
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"]
 if not done_df.empty:
-    st.subheader("📥 4단계: 다운로드")
+    st.subheader("📥 4단계 : 다운로드")
     d1, d2 = st.columns(2)
     with d1:
         ex_out = io.BytesIO()
