@@ -88,11 +88,11 @@ def img_to_base64(image):
 
     if image.mode != 'RGB': image = image.convert('RGB')
 
-    image.thumbnail((1000, 1000)) 
+    image.thumbnail((600, 600)) 
 
     buffered = io.BytesIO()
 
-    image.save(buffered, format="JPEG", quality=60) 
+    image.save(buffered, format="JPEG", quality=30) 
 
     return base64.b64encode(buffered.getvalue()).decode()
 
@@ -521,3 +521,4 @@ if not done_df.empty:
         pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
 
         st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf", use_container_width=True)
+
