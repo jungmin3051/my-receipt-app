@@ -43,9 +43,9 @@ def fix_date(d):
 def img_to_base64(image):
     image = ImageOps.exif_transpose(image)
     if image.mode != 'RGB': image = image.convert('RGB')
-    image.thumbnail((1000, 1000)) 
+    image.thumbnail((600, 600)) 
     buffered = io.BytesIO()
-    image.save(buffered, format="JPEG", quality=60) 
+    image.save(buffered, format="JPEG", quality=30) 
     return base64.b64encode(buffered.getvalue()).decode()
 
 def create_photo_pdf(df):
