@@ -61,11 +61,11 @@ except:
 
 
 # 8:2 비율로 칸 나누기
-header_col1, header_col2 = st.columns([3, 7])
+header_col1, header_col2 = st.columns([8, 2])
 
 with header_col1:
-    # 80% 비중으로 제목 표시
-    st.title("📑 법카 영수증 관리")
+    # st.title 대신 markdown을 사용 (글자 크기 28px로 조절)
+    st.markdown("<h2 style='margin-top:0; font-size: 28px;'>📑 법카 영수증 관리</h2>", unsafe_allow_html=True)
 
 with header_col2:
     # 20% 비중으로 새로고침 버튼 배치
