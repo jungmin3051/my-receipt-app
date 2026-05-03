@@ -43,7 +43,7 @@ def fix_date(d):
 def img_to_base64(image):
     image = ImageOps.exif_transpose(image)
     if image.mode != 'RGB': image = image.convert('RGB')
-    image.thumbnail((800, 800)) 
+    image.thumbnail((600, 600)) 
     buffered = io.BytesIO()
     image.save(buffered, format="JPEG", quality=45) 
     return base64.b64encode(buffered.getvalue()).decode()
