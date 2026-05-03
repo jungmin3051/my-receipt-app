@@ -61,7 +61,7 @@ except:
 
 
 # 8:2 비율로 칸 나누기
-header_col1, header_col2 = st.columns([7, 3])
+header_col1, header_col2 = st.columns([3, 7])
 
 with header_col1:
     # 80% 비중으로 제목 표시
