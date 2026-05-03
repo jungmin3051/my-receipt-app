@@ -32,6 +32,60 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 
 
+# 1. 데이터 로드
+
+COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
+
+try:
+
+    all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
+
+    all_data = all_data[all_data["사진데이터"] != "nan"].fillna("")
+
+    if not all_data.empty:
+
+        all_data['날짜'] = all_data['날짜'].apply(fix_date)
+
+        all_data['금액'] = all_data['금액'].apply(format_price)
+
+        all_data['temp_p'] = all_data['시간대'].apply(get_meal_priority)
+
+        all_data = all_data.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True)
+
+        all_data = all_data.drop(columns=['temp_p'])
+
+except:
+
+    all_data = pd.DataFrame(columns=COLUMNS)
+
+
+
+# 8:2 비율로 칸 나누기
+header_col1, header_col2 = st.columns([7, 3])
+
+with header_col1:
+    # 80% 비중으로 제목 표시
+    st.title("📑 법카 영수증 관리")
+
+with header_col2:
+    # 20% 비중으로 새로고침 버튼 배치
+    st.write("") # 버튼이 제목이랑 높이가 맞게 살짝 내림
+    if st.button("🔄 새로고침", use_container_width=True):
+        st.cache_data.clear() # 캐시 삭제 (구글 시트 새로 읽기)
+        st.rerun()           # 앱 다시 실행
+
+
+
+
+
+
+
+
+
+
+
+
+
 # [정렬용] 우선순위 설정
 
 MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5 , "회식": 6}
@@ -152,35 +206,7 @@ def create_photo_pdf(df):
 
 
 
-# 1. 데이터 로드
 
-COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
-
-try:
-
-    all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
-
-    all_data = all_data[all_data["사진데이터"] != "nan"].fillna("")
-
-    if not all_data.empty:
-
-        all_data['날짜'] = all_data['날짜'].apply(fix_date)
-
-        all_data['금액'] = all_data['금액'].apply(format_price)
-
-        all_data['temp_p'] = all_data['시간대'].apply(get_meal_priority)
-
-        all_data = all_data.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True)
-
-        all_data = all_data.drop(columns=['temp_p'])
-
-except:
-
-    all_data = pd.DataFrame(columns=COLUMNS)
-
-
-
-st.title("📑 법카 영수증 관리")
 
 
 
