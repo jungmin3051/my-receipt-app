@@ -45,7 +45,7 @@ def img_to_base64(image):
     if image.mode != 'RGB': image = image.convert('RGB')
     image.thumbnail((700, 700)) 
     buffered = io.BytesIO()
-    image.save(buffered, format="JPEG", quality=40) 
+    image.save(buffered, format="JPEG", quality=60) 
     return base64.b64encode(buffered.getvalue()).decode()
 
 def create_photo_pdf(df):
