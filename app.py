@@ -158,8 +158,8 @@ if not all_data.empty:
             with st.spinner("저장 중..."):
                 row_list[idx].update({
                     "날짜": u_date.strftime('%y-%m-%d'), 
-                    "식당명": u_name, 
                     "시간대": u_meal, 
+                    "식당명": u_name, 
                     "금액": format_price(u_price), 
                     "비고": u_note, 
                     "상태": "완료"
