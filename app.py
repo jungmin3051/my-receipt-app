@@ -211,9 +211,12 @@ if not all_data.empty:
     done_items['구간'] = done_items['날짜'].apply(get_day_group)
     periodic_sum = done_items.groupby('구간')['int_amount'].sum().to_dict()
     
-    total_sum = done_items['int_amount'].sum()
+    # 1. total_sum 계산 시 안전하게 숫자로 변환
+    total_sum = pd.to_numeric(done_items['int_amount'], errors='coerce').fillna(0).sum()
+    
+    # 2. 계산할 때 int()로 감싸서 확실히 숫자로 인식하게 함
     limit_amount = 500000
-    remaining_amount = limit_amount - total_sum
+    remaining_amount = limit_amount - int(total_sum)
     remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
 
     # 1. 상단 총액 요약
