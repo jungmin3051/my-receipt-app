@@ -110,9 +110,15 @@ with st.expander("📸 1단계 : 사진 업로드", expanded=True):
             st.rerun()
 
 # --- 2단계: 개별 내용 수정 ---
+
 st.divider()
+st.subheader("💻 2단계 : 개별 내용 수정")
 if not all_data.empty:
-    st.subheader("💻 2단계 : 개별 내용 수정")
+    # 수정 기능 실행
+else:
+    st.info("등록된 영수증이 없습니다. 사진을 먼저 업로드해주세요.")
+
+    
     row_list = all_data.to_dict('records')
     if "selected_index" not in st.session_state:
         st.session_state.selected_index = 0
