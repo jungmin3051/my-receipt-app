@@ -110,25 +110,24 @@ with st.expander("📸 1단계 : 사진 업로드", expanded=True):
             st.rerun()
 
 # --- 2단계: 개별 내용 수정 ---
-
 st.divider()
 st.subheader("💻 2단계 : 개별 내용 수정")
-if not all_data.empty:
-    # 수정 기능 실행
-else:
-    st.info("등록된 영수증이 없습니다. 사진을 먼저 업로드해주세요.")
 
-    
+if not all_data.empty:
+    # [중요] 여기서부터는 데이터가 있을 때만 실행되도록 모두 들여쓰기가 되어야 합니다.
     row_list = all_data.to_dict('records')
+    
     if "selected_index" not in st.session_state:
         st.session_state.selected_index = 0
         for i, r in enumerate(row_list):
             if r["상태"] == "대기":
                 st.session_state.selected_index = i
                 break
+                
     curr_idx = min(st.session_state.selected_index, len(row_list)-1)
     idx = st.selectbox("항목 선택", range(len(row_list)), index=curr_idx,
                        format_func=lambda x: f"[{x+1}] {row_list[x]['날짜']} | {row_list[x]['식당명']}")
+    
     if idx != st.session_state.selected_index:
         st.session_state.selected_index = idx
         st.rerun()
@@ -136,8 +135,11 @@ else:
     row = row_list[idx]
     is_pending = (row["상태"] == "대기")
     c1, c2 = st.columns([1, 2])
+    
     with c1: 
-        if row["사진데이터"]: st.image(base64.b64decode(row["사진데이터"]), width=300)
+        if row["사진데이터"]: 
+            st.image(base64.b64decode(row["사진데이터"]), width=300)
+            
     with c2:
         f1, f2 = st.columns(2)
         with f1:
@@ -149,10 +151,19 @@ else:
             meal_opts = ["조식", "중식", "중식2", "석식", "석식2", "회식"]
             u_meal = st.selectbox("시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             u_price = st.text_input("금액", value="" if is_pending else row["금액"])
+            
         u_note = st.text_input("비고", value="" if is_pending else row["비고"])
+        
         if st.button("💾 이 항목 저장", use_container_width=True):
             with st.spinner("저장 중..."):
-                row_list[idx].update({"날짜": u_date.strftime('%y-%m-%d'), "식당명": u_name, "시간대": u_meal, "금액": format_price(u_price), "비고": u_note, "상태": "완료"})
+                row_list[idx].update({
+                    "날짜": u_date.strftime('%y-%m-%d'), 
+                    "식당명": u_name, 
+                    "시간대": u_meal, 
+                    "금액": format_price(u_price), 
+                    "비고": u_note, 
+                    "상태": "완료"
+                })
                 conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=pd.DataFrame(row_list)[COLUMNS])
                 st.cache_data.clear()
                 for i in range(len(row_list)):
@@ -161,6 +172,9 @@ else:
                         break
                 time.sleep(0.5)
                 st.rerun()
+else:
+    # 데이터가 없을 때 실행되는 부분
+    st.info("등록된 영수증이 없습니다. 사진을 먼저 업로드해주세요.")
 
 
 
