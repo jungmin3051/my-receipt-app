@@ -76,7 +76,7 @@ def create_photo_pdf(df):
     return bytes(pdf.output())
 
 # 1. 데이터 로드
-COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
+COLUMNS = ["날짜", "시간대", "식당명", "금액", "비고", "사진데이터", "상태"]
 try:
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
     all_data = all_data[all_data["사진데이터"] != "nan"].fillna("")
