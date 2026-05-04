@@ -110,11 +110,11 @@ with st.expander("📸 1단계 : 사진 업로드", expanded=True):
             st.rerun()
 
 # --- 2단계: 개별 내용 수정 ---
+# --- 2단계: 개별 내용 수정 ---
 st.divider()
 st.subheader("💻 2단계 : 개별 내용 수정")
 
 if not all_data.empty:
-    # [중요] 여기서부터는 데이터가 있을 때만 실행되도록 모두 들여쓰기가 되어야 합니다.
     row_list = all_data.to_dict('records')
     
     if "selected_index" not in st.session_state:
@@ -140,8 +140,8 @@ if not all_data.empty:
         if row["사진데이터"]: 
             st.image(base64.b64decode(row["사진데이터"]), width=300)
             
-   with c2:
-        # 첫 번째 줄: 날짜와 시간대 (가장 먼저 입력)
+    with c2:
+        # 순서 최적화: 날짜 -> 시간대
         f1, f2 = st.columns(2)
         with f1:
             try: d_val = datetime.strptime(row["날짜"], '%y-%m-%d')
@@ -151,26 +151,21 @@ if not all_data.empty:
             meal_opts = ["조식", "중식", "중식2", "석식", "석식2", "회식"]
             u_meal = st.selectbox("2. 시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             
-        # 두 번째 줄: 식당명과 금액
+        # 순서 최적화: 식당명 -> 금액
         f3, f4 = st.columns(2)
         with f3:
             u_name = st.text_input("3. 식당명", value="" if is_pending else row["식당명"])
         with f4:
             u_price = st.text_input("4. 금액", value="" if is_pending else row["금액"])
             
-        # 세 번째 줄: 비고
+        # 순서 최적화: 비고
         u_note = st.text_input("5. 비고", value="" if is_pending else row["비고"])
         
-        # 저장 버튼
         if st.button("💾 이 항목 저장", use_container_width=True):
-            # ... (기존 저장 로직과 동일)
-
-
-            
             with st.spinner("저장 중..."):
                 row_list[idx].update({
                     "날짜": u_date.strftime('%y-%m-%d'), 
-                    "시간대": u_meal, 
+                    "시간대": u_meal,
                     "식당명": u_name, 
                     "금액": format_price(u_price), 
                     "비고": u_note, 
@@ -185,9 +180,7 @@ if not all_data.empty:
                 time.sleep(0.5)
                 st.rerun()
 else:
-    # 데이터가 없을 때 실행되는 부분
     st.info("등록된 영수증이 없습니다. 사진을 먼저 업로드해주세요.")
-
 
 
 
