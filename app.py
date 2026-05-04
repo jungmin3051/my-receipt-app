@@ -140,21 +140,33 @@ if not all_data.empty:
         if row["사진데이터"]: 
             st.image(base64.b64decode(row["사진데이터"]), width=300)
             
-    with c2:
+   with c2:
+        # 첫 번째 줄: 날짜와 시간대 (가장 먼저 입력)
         f1, f2 = st.columns(2)
         with f1:
             try: d_val = datetime.strptime(row["날짜"], '%y-%m-%d')
             except: d_val = datetime.now()
-            u_date = st.date_input("날짜", d_val)
-            u_name = st.text_input("식당명", value="" if is_pending else row["식당명"])
+            u_date = st.date_input("1. 날짜", d_val)
         with f2:
             meal_opts = ["조식", "중식", "중식2", "석식", "석식2", "회식"]
-            u_meal = st.selectbox("시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
-            u_price = st.text_input("금액", value="" if is_pending else row["금액"])
+            u_meal = st.selectbox("2. 시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             
-        u_note = st.text_input("비고", value="" if is_pending else row["비고"])
+        # 두 번째 줄: 식당명과 금액
+        f3, f4 = st.columns(2)
+        with f3:
+            u_name = st.text_input("3. 식당명", value="" if is_pending else row["식당명"])
+        with f4:
+            u_price = st.text_input("4. 금액", value="" if is_pending else row["금액"])
+            
+        # 세 번째 줄: 비고
+        u_note = st.text_input("5. 비고", value="" if is_pending else row["비고"])
         
+        # 저장 버튼
         if st.button("💾 이 항목 저장", use_container_width=True):
+            # ... (기존 저장 로직과 동일)
+
+
+            
             with st.spinner("저장 중..."):
                 row_list[idx].update({
                     "날짜": u_date.strftime('%y-%m-%d'), 
