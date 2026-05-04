@@ -43,7 +43,7 @@ def img_to_base64(image):
     image = ImageOps.exif_transpose(image)
     if image.mode != 'RGB': image = image.convert('RGB')
     # 선임님, 추천드렸던 700 / 40 세팅으로 적용했습니다!
-    image.thumbnail((700, 700)) 
+    image.thumbnail((600, 600)) 
     buffered = io.BytesIO()
     image.save(buffered, format="JPEG", quality=40) 
     return base64.b64encode(buffered.getvalue()).decode()
