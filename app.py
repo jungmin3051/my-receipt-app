@@ -187,44 +187,33 @@ else:
 
 
 
-
 # --- 3단계: 내역 확인 및 삭제 ---
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계 : 내역 확인 및 삭제")
 
-
-
-    
-    # 데이터 정리 및 표 출력
+    # 1. 데이터 정리 (사진 제외한 표 출력)
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
     edit_df["삭제체크"] = False
     edit_df.index = edit_df.index + 1 
     edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
-    
-    def parse_money(x):
-        try: return int(str(x).replace(',', '').replace('원', ''))
-        except: return 0
 
+    # 2. 통합 통계 계산 (회식 포함 전체 합계)
     done_items = all_data[all_data["상태"] == "완료"].copy()
-    done_items['int_amount'] = done_items['금액'].apply(parse_money)
     
-    # [회식 데이터 계산]
-    # [회식 데이터 계산] - 수정 버전
-    dinner_items = done_items[done_items["시간대"] == "회식"].copy()
-    
-    # dinner_usage를 계산할 때 숫자가 아닌 경우 0으로 처리
-    if not dinner_items.empty:
-        dinner_usage = pd.to_numeric(dinner_items['int_amount'], errors='coerce').fillna(0).sum()
-    else:
-        dinner_usage = 0
-        
-    dinner_diff = 100000 - int(dinner_usage)  # 강제로 int 변환 후 계산
-    dinner_color = "#ff4b4b" if dinner_diff < 0 else "#1f77b4"
+    # 금액 숫자 변환 로직 보강
+    done_items['int_amount'] = pd.to_numeric(
+        done_items['금액'].astype(str).str.replace(',', '').str.replace('원', ''), 
+        errors='coerce'
+    ).fillna(0).astype(int)
 
+    # [전체 합산] 상단 요약용
+    total_sum = done_items['int_amount'].sum()
+    limit_amount = 500000
+    remaining_amount = limit_amount - total_sum
+    remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
 
-    
-
+    # [구간별 합산] 테이블용 (회식 제외 일반 식사)
     def get_day_group(date_str):
         try:
             day = int(str(date_str).split('-')[-1])
@@ -233,40 +222,49 @@ if not all_data.empty:
             else: return "21~말일"
         except: return "기타"
 
-    done_items['구간'] = done_items['날짜'].apply(get_day_group)
-    periodic_sum = done_items.groupby('구간')['int_amount'].sum().to_dict()
-    
-    # 1. total_sum 계산 시 안전하게 숫자로 변환
-    total_sum = pd.to_numeric(done_items['int_amount'], errors='coerce').fillna(0).sum()
-    
-    # 2. 계산할 때 int()로 감싸서 확실히 숫자로 인식하게 함
-    limit_amount = 500000
-    remaining_amount = limit_amount - int(total_sum)
-    remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
+    normal_meals = done_items[done_items["시간대"] != "회식"].copy()
+    normal_meals['구간'] = normal_meals['날짜'].apply(get_day_group)
+    periodic_sum = normal_meals.groupby('구간')['int_amount'].sum().to_dict()
 
-    # 1. 상단 총액 요약
-    summary_html = f"<div style='background-color:#f8f9fb;padding:12px;border-radius:10px;border:1px solid #e6e9ef;margin:10px 0;'><div style='display:flex;justify-content:space-around;align-items:center;'> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💳 총 사용 금액</span><br><span style='font-size:22px;font-weight:bold;'>{total_sum:,} 원</span></div> <div style='width:1px;height:35px;background-color:#e6e9ef;'></div> <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💰 총 남은 금액</span><br><span style='font-size:22px;color:{remain_color};font-weight:bold;'>{remaining_amount:,} 원</span></div> </div></div>"
+    # [회식 합산] 테이블용
+    dinner_items = done_items[done_items["시간대"] == "회식"].copy()
+    dinner_usage = dinner_items['int_amount'].sum()
+    dinner_diff = 100000 - dinner_usage
+    dinner_color = "#ff4b4b" if dinner_diff < 0 else "#1f77b4"
+
+    # --- 3. UI 출력 (HTML 요약 및 테이블) ---
+    summary_html = f"""
+    <div style='background-color:#f8f9fb;padding:12px;border-radius:10px;border:1px solid #e6e9ef;margin:10px 0;'>
+        <div style='display:flex;justify-content:space-around;align-items:center;'> 
+            <div style='text-align:center;'>
+                <span style='font-size:14px;color:#666;'>💳 총 사용 금액 (회식 포함)</span><br>
+                <span style='font-size:22px;font-weight:bold;'>{total_sum:,} 원</span>
+            </div> 
+            <div style='width:1px;height:35px;background-color:#e6e9ef;'></div> 
+            <div style='text-align:center;'>
+                <span style='font-size:14px;color:#666;'>💰 전체 남은 한도</span><br>
+                <span style='font-size:22px;color:{remain_color};font-weight:bold;'>{remaining_amount:,} 원</span>
+            </div> 
+        </div>
+    </div>
+    """
     st.markdown(summary_html, unsafe_allow_html=True)
 
-    # 2. 구간 테이블 (회식 줄 스타일 통일)
     table_html = "<table style='width:100%;border-collapse:collapse;text-align:center;border:1px solid #e6e9ef;font-size:14px;'>"
-    table_html += "<thead style='background-color:#f1f3f6;'><tr><th style='padding:10px;border:1px solid #e6e9ef;'>구간</th><th style='padding:10px;border:1px solid #e6e9ef;'>사용 금액</th><th style='padding:10px;border:1px solid #e6e9ef;'>한도 대비 잔액</th></tr></thead><tbody>"
+    table_html += "<thead style='background-color:#f1f3f6;'><tr><th style='padding:10px;border:1px solid #e6e9ef;'>구간</th><th style='padding:10px;border:1px solid #e6e9ef;'>사용 금액</th><th style='padding:10px;border:1px solid #e6e9ef;'>구간 한도 잔액</th></tr></thead><tbody>"
     
-    # 일반 구간 (11~20 -> 21~말 -> 1~10)
     custom_order = ["11~20일", "21~말일", "1~10일"]
     for p in custom_order:
         usage = periodic_sum.get(p, 0)
         diff = 130000 - usage
         d_color = "#ff4b4b" if diff < 0 else "#1f77b4"
-        table_html += f"<tr><td style='padding:10px;border:1px solid #eee;background-color:#fff;'>{p}</td><td style='padding:10px;border:1px solid #eee;background-color:#fff;'>₩ {usage:,}</td><td style='padding:10px;border:1px solid #eee;background-color:#fff;color:{d_color};font-weight:bold;'>₩ {diff:,}</td></tr>"
+        table_html += f"<tr><td style='padding:10px;border:1px solid #eee;'>{p}</td><td style='padding:10px;border:1px solid #eee;'>₩ {usage:,}</td><td style='padding:10px;border:1px solid #eee;color:{d_color};font-weight:bold;'>₩ {diff:,}</td></tr>"
     
-    # [회식] 줄 - 배경색 제거, 볼드체 제거 (잔액 강조만 유지)
-    table_html += f"<tr><td style='padding:10px;border:1px solid #eee;background-color:#fff;'>회식</td><td style='padding:10px;border:1px solid #eee;background-color:#fff;'>₩ {dinner_usage:,}</td><td style='padding:10px;border:1px solid #eee;background-color:#fff;color:{dinner_color};font-weight:bold;'>₩ {dinner_diff:,}</td></tr>"
-    
-    table_html += "</tbody></table><div style='margin-bottom:20px;'></div>"
+    table_html += f"<tr><td style='padding:10px;border:1px solid #eee;'>회식</td><td style='padding:10px;border:1px solid #eee;'>₩ {dinner_usage:,}</td><td style='padding:10px;border:1px solid #eee;color:{dinner_color};font-weight:bold;'>₩ {dinner_diff:,}</td></tr>"
+    table_html += "</tbody></table>"
     st.markdown(table_html, unsafe_allow_html=True)
 
-    # 삭제 버튼 로직
+    # 4. 삭제 버튼 로직
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
     if checked_indices:
         if st.button(f"🗑️ {len(checked_indices)}개 항목 삭제하기", type="primary", use_container_width=True):
@@ -274,7 +272,6 @@ if not all_data.empty:
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
             st.cache_data.clear()
             st.rerun()
-
 
 
 
