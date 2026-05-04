@@ -185,10 +185,20 @@ if not all_data.empty:
     done_items['int_amount'] = done_items['금액'].apply(parse_money)
     
     # [회식 데이터 계산]
+    # [회식 데이터 계산] - 수정 버전
     dinner_items = done_items[done_items["시간대"] == "회식"].copy()
-    dinner_usage = dinner_items['int_amount'].sum()
-    dinner_diff = 100000 - dinner_usage
+    
+    # dinner_usage를 계산할 때 숫자가 아닌 경우 0으로 처리
+    if not dinner_items.empty:
+        dinner_usage = pd.to_numeric(dinner_items['int_amount'], errors='coerce').fillna(0).sum()
+    else:
+        dinner_usage = 0
+        
+    dinner_diff = 100000 - int(dinner_usage)  # 강제로 int 변환 후 계산
     dinner_color = "#ff4b4b" if dinner_diff < 0 else "#1f77b4"
+
+
+    
 
     def get_day_group(date_str):
         try:
