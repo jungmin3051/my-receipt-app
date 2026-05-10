@@ -9,7 +9,6 @@ from fpdf import FPDF
 import time
 import os
 
-
 # 0. 기본 설정
 st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
@@ -21,7 +20,6 @@ MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5 
 def get_meal_priority(meal_name):
     return MEAL_ORDER.get(meal_name, 6)
 
-# [출력용] 숫자 제거 함수
 def clean_meal_name(meal_name):
     if "중식" in meal_name: return "중식"
     if "석식" in meal_name: return "석식"
@@ -30,7 +28,7 @@ def clean_meal_name(meal_name):
 def format_price(val):
     try:
         if not val or str(val).lower() in ['nan', '0', '']: return ""
-        clean_val = str(val).split('.')[0].replace(',', '')
+        clean_val = str(val).split('.')[0].replace(',', '').replace('원', '')
         if clean_val.isdigit(): return f"{int(clean_val):,}"
         return val
     except: return ""
@@ -40,13 +38,26 @@ def fix_date(d):
     if len(d_str) > 8: return d_str[-8:] 
     return d_str
 
+# [수정포인트 1] 용량 자동 조절 함수 (디자인 무관)
 def img_to_base64(image):
     image = ImageOps.exif_transpose(image)
     if image.mode != 'RGB': image = image.convert('RGB')
+    
+    # 선임님이 원하시는 700 사이즈 시도
     image.thumbnail((700, 700)) 
-    buffered = io.BytesIO()
-    image.save(buffered, format="JPEG", quality=40) 
-    return base64.b64encode(buffered.getvalue()).decode()
+    quality = 40 # 기본 퀄리티
+    
+    while True:
+        buffered = io.BytesIO()
+        image.save(buffered, format="JPEG", quality=quality)
+        b64_string = base64.b64encode(buffered.getvalue()).decode()
+        
+        # 구글 시트 안전선(약 5만자) 체크: 48,000자 아래면 통과
+        if len(b64_string) < 48000 or quality <= 15:
+            return b64_string
+        
+        # 5만자 넘으면 퀄리티를 낮춰서 재시도
+        quality -= 5
 
 def create_photo_pdf(df):
     pdf = FPDF()
@@ -91,25 +102,33 @@ except:
 
 st.title("📑 법카 영수증 관리")
 
-# --- [수정] 1단계 : 사진 업로드 (expanded=True로 항상 열림) ---
+# --- 1단계 : 사진 업로드 ---
 with st.expander("📸 1단계 : 사진 업로드", expanded=True):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files and st.button("🚀 사진 전송"):
         new_list = []
         now = datetime.now()
-        for f in files:
+        # [수정포인트 2] 전송 로직의 안전성 강화
+        progress_text = st.empty()
+        for i, f in enumerate(files):
             try:
+                progress_text.text(f"처리 중... ({i+1}/{len(files)})")
                 img_b64 = img_to_base64(Image.open(f))
-                new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", "금액": "", "비고": "", "사진데이터": img_b64, "상태": "대기"})
+                new_list.append({"날짜": now.strftime('%y-%m-%d'), "시간대": "중식", "식당명": "", "금액": "", "비고": "", "사진데이터": img_b64, "상태": "대기"})
             except Exception as e: st.error(f"오류: {e}")
+        
         if new_list:
+            # 기존 데이터 뒤에 붙여서 업데이트
             updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
-            conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
-            st.cache_data.clear()
-            time.sleep(1)
-            st.rerun()
+            try:
+                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
+                st.cache_data.clear()
+                st.success("안전하게 저장되었습니다!")
+                time.sleep(1)
+                st.rerun()
+            except Exception as e:
+                st.error("구글 시트 용량 초과 에러가 발생했습니다. 사진 수를 줄이거나 품질을 낮춰야 합니다.")
 
-# --- 2단계: 개별 내용 수정 ---
 # --- 2단계: 개별 내용 수정 ---
 st.divider()
 st.subheader("💻 2단계 : 개별 내용 수정")
@@ -141,7 +160,6 @@ if not all_data.empty:
             st.image(base64.b64decode(row["사진데이터"]), width=300)
             
     with c2:
-        # 순서 최적화: 날짜 -> 시간대
         f1, f2 = st.columns(2)
         with f1:
             try: d_val = datetime.strptime(row["날짜"], '%y-%m-%d')
@@ -151,14 +169,12 @@ if not all_data.empty:
             meal_opts = ["조식", "중식", "중식2", "석식", "석식2", "회식"]
             u_meal = st.selectbox("2. 시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             
-        # 순서 최적화: 식당명 -> 금액
         f3, f4 = st.columns(2)
         with f3:
             u_name = st.text_input("3. 식당명", value="" if is_pending else row["식당명"])
         with f4:
             u_price = st.text_input("4. 금액", value="" if is_pending else row["금액"])
             
-        # 순서 최적화: 비고
         u_note = st.text_input("5. 비고", value="" if is_pending else row["비고"])
         
         if st.button("💾 이 항목 저장", use_container_width=True):
@@ -180,40 +196,26 @@ if not all_data.empty:
                 time.sleep(0.5)
                 st.rerun()
 else:
-    st.info("등록된 영수증이 없습니다. 사진을 먼저 업로드해주세요.")
+    st.info("등록된 영수증이 없습니다.")
 
-
-
-
-
-
-# --- 3단계: 내역 확인 및 삭제 ---
+# --- 3단계: 내역 확인 및 삭제 (선임님 기존 디자인 유지) ---
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계 : 내역 확인 및 삭제")
 
-    # 1. 데이터 정리 (사진 제외한 표 출력)
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
     edit_df["삭제체크"] = False
     edit_df.index = edit_df.index + 1 
     edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
 
-    # 2. 통합 통계 계산 (회식 포함 전체 합계)
     done_items = all_data[all_data["상태"] == "완료"].copy()
-    
-    # 금액 숫자 변환 로직 보강
-    done_items['int_amount'] = pd.to_numeric(
-        done_items['금액'].astype(str).str.replace(',', '').str.replace('원', ''), 
-        errors='coerce'
-    ).fillna(0).astype(int)
+    done_items['int_amount'] = pd.to_numeric(done_items['금액'].astype(str).str.replace(',', '').str.replace('원', ''), errors='coerce').fillna(0).astype(int)
 
-    # [전체 합산] 상단 요약용
     total_sum = done_items['int_amount'].sum()
-    limit_amount = 500000
-    remaining_amount = limit_amount - total_sum
+    remaining_amount = 500000 - total_sum
     remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
 
-    # [구간별 합산] 테이블용 (회식 제외 일반 식사)
+    # [구간/회식 합산 로직]
     def get_day_group(date_str):
         try:
             day = int(str(date_str).split('-')[-1])
@@ -226,25 +228,17 @@ if not all_data.empty:
     normal_meals['구간'] = normal_meals['날짜'].apply(get_day_group)
     periodic_sum = normal_meals.groupby('구간')['int_amount'].sum().to_dict()
 
-    # [회식 합산] 테이블용
     dinner_items = done_items[done_items["시간대"] == "회식"].copy()
     dinner_usage = dinner_items['int_amount'].sum()
     dinner_diff = 100000 - dinner_usage
     dinner_color = "#ff4b4b" if dinner_diff < 0 else "#1f77b4"
 
-    # --- 3. UI 출력 (HTML 요약 및 테이블) ---
     summary_html = f"""
     <div style='background-color:#f8f9fb;padding:12px;border-radius:10px;border:1px solid #e6e9ef;margin:10px 0;'>
         <div style='display:flex;justify-content:space-around;align-items:center;'> 
-            <div style='text-align:center;'>
-                <span style='font-size:14px;color:#666;'>💳 총 사용 금액 (회식 포함)</span><br>
-                <span style='font-size:22px;font-weight:bold;'>{total_sum:,} 원</span>
-            </div> 
+            <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💳 총 사용 금액 (회식 포함)</span><br><span style='font-size:22px;font-weight:bold;'>{total_sum:,} 원</span></div> 
             <div style='width:1px;height:35px;background-color:#e6e9ef;'></div> 
-            <div style='text-align:center;'>
-                <span style='font-size:14px;color:#666;'>💰 전체 남은 한도</span><br>
-                <span style='font-size:22px;color:{remain_color};font-weight:bold;'>{remaining_amount:,} 원</span>
-            </div> 
+            <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💰 전체 남은 한도</span><br><span style='font-size:22px;color:{remain_color};font-weight:bold;'>{remaining_amount:,} 원</span></div> 
         </div>
     </div>
     """
@@ -253,8 +247,7 @@ if not all_data.empty:
     table_html = "<table style='width:100%;border-collapse:collapse;text-align:center;border:1px solid #e6e9ef;font-size:14px;'>"
     table_html += "<thead style='background-color:#f1f3f6;'><tr><th style='padding:10px;border:1px solid #e6e9ef;'>구간</th><th style='padding:10px;border:1px solid #e6e9ef;'>사용 금액</th><th style='padding:10px;border:1px solid #e6e9ef;'>구간 한도 잔액</th></tr></thead><tbody>"
     
-    custom_order = ["11~20일", "21~말일", "1~10일"]
-    for p in custom_order:
+    for p in ["11~20일", "21~말일", "1~10일"]:
         usage = periodic_sum.get(p, 0)
         diff = 130000 - usage
         d_color = "#ff4b4b" if diff < 0 else "#1f77b4"
@@ -264,7 +257,6 @@ if not all_data.empty:
     table_html += "</tbody></table>"
     st.markdown(table_html, unsafe_allow_html=True)
 
-    # 4. 삭제 버튼 로직
     checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
     if checked_indices:
         if st.button(f"🗑️ {len(checked_indices)}개 항목 삭제하기", type="primary", use_container_width=True):
@@ -272,13 +264,6 @@ if not all_data.empty:
             conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=remaining_df[COLUMNS])
             st.cache_data.clear()
             st.rerun()
-
-
-
-
-
-
-
 
 # --- 4단계: 다운로드 ---
 st.divider()
@@ -293,5 +278,5 @@ if not done_df.empty:
         excel_df.to_excel(ex_out, index=False)
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
     with d2:
-        pdf_fn = f"{datetime.now().month}월 개인법인카드 영수증_한정민.pdf"
+        pdf_fn = f"{datetime.now().month}월 영수증_한정민.pdf"
         st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf", use_container_width=True)
