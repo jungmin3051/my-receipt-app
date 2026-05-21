@@ -14,11 +14,11 @@ st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# [정렬용] 우선순위 설정
-MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5 , "회식": 6}
+# [정렬용] 우선순위 설정 ('결제취소'는 가장 아래로 정렬되도록 7번 부여)
+MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5 , "회식": 6, "결제취소": 7}
 
 def get_meal_priority(meal_name):
-    return MEAL_ORDER.get(meal_name, 6)
+    return MEAL_ORDER.get(meal_name, 7)
 
 def clean_meal_name(meal_name):
     if "중식" in meal_name: return "중식"
@@ -29,6 +29,9 @@ def format_price(val):
     try:
         if not val or str(val).lower() in ['nan', '0', '']: return ""
         clean_val = str(val).split('.')[0].replace(',', '').replace('원', '')
+        # 취소건의 경우 마이너스(-) 금액도 입력될 수 있으므로 처리
+        if clean_val.startswith('-') and clean_val[1:].isdigit():
+            return f"-{int(clean_val[1:]):,}"
         if clean_val.isdigit(): return f"{int(clean_val):,}"
         return val
     except: return ""
@@ -38,25 +41,21 @@ def fix_date(d):
     if len(d_str) > 8: return d_str[-8:] 
     return d_str
 
-# [수정포인트 1] 용량 자동 조절 함수 (디자인 무관)
 def img_to_base64(image):
     image = ImageOps.exif_transpose(image)
     if image.mode != 'RGB': image = image.convert('RGB')
     
-    # 선임님이 원하시는 700 사이즈 시도
     image.thumbnail((700, 700)) 
-    quality = 40 # 기본 퀄리티
+    quality = 40
     
     while True:
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG", quality=quality)
         b64_string = base64.b64encode(buffered.getvalue()).decode()
         
-        # 구글 시트 안전선(약 5만자) 체크: 48,000자 아래면 통과
         if len(b64_string) < 48000 or quality <= 15:
             return b64_string
         
-        # 5만자 넘으면 퀄리티를 낮춰서 재시도
         quality -= 5
 
 def create_photo_pdf(df):
@@ -72,6 +71,10 @@ def create_photo_pdf(df):
     df_sorted = df.sort_values(by=["날짜", "temp_p"]).reset_index(drop=True)
 
     for i, (_, row) in enumerate(df_sorted.iterrows()):
+        # 결제취소 건은 사진이 없으므로 PDF 파일 생성 시 제외하거나 건너뜁니다.
+        if row["시간대"] == "결제취소" or not row["사진데이터"]:
+            continue
+            
         if i % 4 == 0: pdf.add_page()
         try:
             img_data = base64.b64decode(row["사진데이터"])
@@ -90,12 +93,15 @@ def create_photo_pdf(df):
 COLUMNS = ["날짜", "시간대", "식당명", "금액", "비고", "사진데이터", "상태"]
 try:
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
-    all_data = all_data[all_data["사진데이터"] != "nan"].fillna("")
+    # 사진데이터가 없더라도 결제취소 건은 빈 문자열로 유지하여 로드하도록 변경
+    all_data = all_data.fillna("")
+    all_data = all_data[all_data["날짜"] != "nan"].reset_index(drop=True)
+    
     if not all_data.empty:
         all_data['날짜'] = all_data['날짜'].apply(fix_date)
         all_data['금액'] = all_data['금액'].apply(format_price)
         all_data['temp_p'] = all_data['시간대'].apply(get_meal_priority)
-        all_data = all_data.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True)
+        all_data = all_values = all_data.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True)
         all_data = all_data.drop(columns=['temp_p'])
 except:
     all_data = pd.DataFrame(columns=COLUMNS)
@@ -108,7 +114,6 @@ with st.expander("📸 1단계 : 사진 업로드", expanded=True):
     if files and st.button("🚀 사진 전송"):
         new_list = []
         now = datetime.now()
-        # [수정포인트 2] 전송 로직의 안전성 강화
         progress_text = st.empty()
         for i, f in enumerate(files):
             try:
@@ -118,7 +123,6 @@ with st.expander("📸 1단계 : 사진 업로드", expanded=True):
             except Exception as e: st.error(f"오류: {e}")
         
         if new_list:
-            # 기존 데이터 뒤에 붙여서 업데이트
             updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
             try:
                 conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
@@ -133,6 +137,21 @@ with st.expander("📸 1단계 : 사진 업로드", expanded=True):
 st.divider()
 st.subheader("💻 2단계 : 개별 내용 수정")
 
+# [수정포인트] 사진 없는 취소건을 2단계에서 즉시 추가할 수 있는 버튼 배치
+cc1, cc2 = st.columns([6, 1])
+with cc2:
+    if st.button("➕ 취소건 추가", use_container_width=True):
+        now_date = datetime.now().strftime('%y-%m-%d')
+        cancel_row = pd.DataFrame([{
+            "날짜": now_date, "시간대": "결제취소", "식당명": "", 
+            "금액": "", "비고": "오결제", "사진데이터": "", "상태": "대기"
+        }])
+        all_data = pd.concat([all_data, cancel_row], ignore_index=True)
+        conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=all_data[COLUMNS])
+        st.cache_data.clear()
+        st.session_state.selected_index = len(all_data) - 1
+        st.rerun()
+
 if not all_data.empty:
     row_list = all_data.to_dict('records')
     
@@ -144,8 +163,14 @@ if not all_data.empty:
                 break
                 
     curr_idx = min(st.session_state.selected_index, len(row_list)-1)
-    idx = st.selectbox("항목 선택", range(len(row_list)), index=curr_idx,
-                       format_func=lambda x: f"[{x+1}] {row_list[x]['날짜']} | {row_list[x]['식당명']}")
+    
+    # 셀렉트박스 표시 이름 개선 (결제취소 건은 쉽게 알아볼 수 있게 표시)
+    def make_label(x):
+        r = row_list[x]
+        flag = "❌ [취소] " if r['시간대'] == "결제취소" else f"[{x+1}] "
+        return f"{flag}{r['날짜']} | {r['식당명'] if r['식당명'] else '새 항목(내용 입력 필요)'}"
+
+    idx = st.selectbox("항목 선택", range(len(row_list)), index=curr_idx, format_func=make_label)
     
     if idx != st.session_state.selected_index:
         st.session_state.selected_index = idx
@@ -158,6 +183,8 @@ if not all_data.empty:
     with c1: 
         if row["사진데이터"]: 
             st.image(base64.b64decode(row["사진데이터"]), width=300)
+        else:
+            st.info("📷 이 항목은 사진이 없는 건입니다. (취소건 등)")
             
     with c2:
         f1, f2 = st.columns(2)
@@ -166,16 +193,19 @@ if not all_data.empty:
             except: d_val = datetime.now()
             u_date = st.date_input("1. 날짜", d_val)
         with f2:
-            meal_opts = ["조식", "중식", "중식2", "석식", "석식2", "회식"]
-            u_meal = st.selectbox("2. 시간대", meal_opts, index=1 if is_pending else meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
+            # 시간대 옵션에 '결제취소' 추가
+            meal_opts = ["조식", "중식", "중식2", "석식", "석식2", "회식", "결제취소"]
+            u_meal = st.selectbox("2. 시간대", meal_opts, index=meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             
         f3, f4 = st.columns(2)
         with f3:
-            u_name = st.text_input("3. 식당명", value="" if is_pending else row["식당명"])
+            u_name = st.text_input("3. 식당명", value="" if is_pending and row["시간대"] != "결제취소" else row["식당명"])
         with f4:
-            u_price = st.text_input("4. 금액", value="" if is_pending else row["금액"])
+            u_price = st.text_input("4. 금액", value="" if is_pending and row["시간대"] != "결제취소" else row["금액"])
             
-        u_note = st.text_input("5. 비고", value="" if is_pending else row["비고"])
+        # 시간대가 '결제취소'일 때는 자동으로 '오결제'가 디폴트로 박히도록 로직 보완
+        default_note = "오결제" if u_meal == "결제취소" else row["비고"]
+        u_note = st.text_input("5. 비고", value=default_note)
         
         if st.button("💾 이 항목 저장", use_container_width=True):
             with st.spinner("저장 중..."):
@@ -198,7 +228,7 @@ if not all_data.empty:
 else:
     st.info("등록된 영수증이 없습니다.")
 
-# --- 3단계: 내역 확인 및 삭제 (선임님 기존 디자인 유지) ---
+# --- 3단계: 내역 확인 및 삭제 ---
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계 : 내역 확인 및 삭제")
@@ -209,13 +239,21 @@ if not all_data.empty:
     edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
 
     done_items = all_data[all_data["상태"] == "완료"].copy()
-    done_items['int_amount'] = pd.to_numeric(done_items['금액'].astype(str).str.replace(',', '').str.replace('원', ''), errors='coerce').fillna(0).astype(int)
+    
+    # 마이너스 금액 자릿수 및 콤마 제거 후 연산을 위해 정상 변환
+    def to_int(val):
+        try:
+            clean = str(val).replace(',', '').replace('원', '').strip()
+            return int(clean)
+        except:
+            return 0
+
+    done_items['int_amount'] = done_items['금액'].apply(to_int)
 
     total_sum = done_items['int_amount'].sum()
     remaining_amount = 500000 - total_sum
     remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
 
-    # [구간/회식 합산 로직]
     def get_day_group(date_str):
         try:
             day = int(str(date_str).split('-')[-1])
@@ -224,7 +262,8 @@ if not all_data.empty:
             else: return "21~말일"
         except: return "기타"
 
-    normal_meals = done_items[done_items["시간대"] != "회식"].copy()
+    # 일반 식대 계산시 '결제취소' 건은 마이너스 처리가 되도록 포함하되 구간 정리에 맞춤
+    normal_meals = done_items[~done_items["시간대"].isin(["회식"])].copy()
     normal_meals['구간'] = normal_meals['날짜'].apply(get_day_group)
     periodic_sum = normal_meals.groupby('구간')['int_amount'].sum().to_dict()
 
@@ -236,7 +275,7 @@ if not all_data.empty:
     summary_html = f"""
     <div style='background-color:#f8f9fb;padding:12px;border-radius:10px;border:1px solid #e6e9ef;margin:10px 0;'>
         <div style='display:flex;justify-content:space-around;align-items:center;'> 
-            <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💳 총 사용 금액 (회식 포함)</span><br><span style='font-size:22px;font-weight:bold;'>{total_sum:,} 원</span></div> 
+            <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💳 총 사용 금액 (회식/취소 반영)</span><br><span style='font-size:22px;font-weight:bold;'>{total_sum:,} 원</span></div> 
             <div style='width:1px;height:35px;background-color:#e6e9ef;'></div> 
             <div style='text-align:center;'><span style='font-size:14px;color:#666;'>💰 전체 남은 한도</span><br><span style='font-size:22px;color:{remain_color};font-weight:bold;'>{remaining_amount:,} 원</span></div> 
         </div>
@@ -274,7 +313,7 @@ if not done_df.empty:
     with d1:
         ex_out = io.BytesIO()
         excel_df = done_df.drop(columns=["사진데이터", "상태"], errors='ignore').copy()
-        excel_df["시간대"] = excel_df["시간대"].apply(clean_meal_name)
+        excel_df["시간대"] = excel_df["시간대"].apply(lambda x: "결제취소" if x == "결제취소" else clean_meal_name(x))
         excel_df.to_excel(ex_out, index=False)
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
     with d2:
