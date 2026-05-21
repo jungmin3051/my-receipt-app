@@ -233,12 +233,33 @@ if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계 : 내역 확인 및 삭제")
 
-    edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
-    edit_df["삭제체크"] = False
-    edit_df.index = edit_df.index + 1 
-    edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
 
+    
+    # 1. 선임님이 원하시는 [날짜 -> 식당명 -> 시간대] 순서로 리스트를 정의합니다.
+SHOW_COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "상태", "삭제체크"]
+
+edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
+edit_df["삭제체크"] = False
+
+# 2. 정의한 순서대로 컬럼 위치를 강제로 재배치합니다.
+edit_df = edit_df[SHOW_COLUMNS]
+
+edit_df.index = edit_df.index + 1 
+
+# 3. 정렬된 데이터를 화면에 뿌려줍니다.
+edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
+
+
+
+
+
+    
     done_items = all_data[all_data["상태"] == "완료"].copy()
+
+
+
+
+
     
     # 마이너스 금액 자릿수 및 콤마 제거 후 연산을 위해 정상 변환
     def to_int(val):
