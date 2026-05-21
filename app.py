@@ -90,7 +90,7 @@ def create_photo_pdf(df):
     return bytes(pdf.output())
 
 # 1. 데이터 로드
-COLUMNS = ["날짜", "시간대", "식당명", "금액", "비고", "사진데이터", "상태"]
+COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
 try:
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
     # 사진데이터가 없더라도 결제취소 건은 빈 문자열로 유지하여 로드하도록 변경
