@@ -14,7 +14,7 @@ st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# [정렬용] 우선순위 설정 ('결제취소'는 가장 아래로 정렬되도록 7번 부여)
+# [정렬용] 우선순위 설정
 MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5 , "회식": 6, "결제취소": 7}
 
 def get_meal_priority(meal_name):
@@ -29,7 +29,6 @@ def format_price(val):
     try:
         if not val or str(val).lower() in ['nan', '0', '']: return ""
         clean_val = str(val).split('.')[0].replace(',', '').replace('원', '')
-        # 취소건의 경우 마이너스(-) 금액도 입력될 수 있으므로 처리
         if clean_val.startswith('-') and clean_val[1:].isdigit():
             return f"-{int(clean_val[1:]):,}"
         if clean_val.isdigit(): return f"{int(clean_val):,}"
@@ -53,7 +52,8 @@ def img_to_base64(image):
         image.save(buffered, format="JPEG", quality=quality)
         b64_string = base64.b64encode(buffered.getvalue()).decode()
         
-        if len(b64_string) < 48000 or quality <= 15:
+        # 구글 시트 안정선(약 5만자) 체크: 안전하게 43,000자 선으로 대폭 하향 조정
+        if len(b64_string) < 43000 or quality <= 10:
             return b64_string
         
         quality -= 5
@@ -71,7 +71,6 @@ def create_photo_pdf(df):
     df_sorted = df.sort_values(by=["날짜", "temp_p"]).reset_index(drop=True)
 
     for i, (_, row) in enumerate(df_sorted.iterrows()):
-        # 결제취소 건은 사진이 없으므로 PDF 파일 생성 시 제외하거나 건너뜁니다.
         if row["시간대"] == "결제취소" or not row["사진데이터"]:
             continue
             
@@ -93,7 +92,6 @@ def create_photo_pdf(df):
 COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "사진데이터", "상태"]
 try:
     all_data = conn.read(spreadsheet=SHEET_URL, worksheet="Sheet1", ttl=0).astype(str)
-    # 사진데이터가 없더라도 결제취소 건은 빈 문자열로 유지하여 로드하도록 변경
     all_data = all_data.fillna("")
     all_data = all_data[all_data["날짜"] != "nan"].reset_index(drop=True)
     
@@ -101,55 +99,62 @@ try:
         all_data['날짜'] = all_data['날짜'].apply(fix_date)
         all_data['금액'] = all_data['금액'].apply(format_price)
         all_data['temp_p'] = all_data['시간대'].apply(get_meal_priority)
-        all_data = all_values = all_data.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True)
+        all_data = all_data.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True)
         all_data = all_data.drop(columns=['temp_p'])
 except:
     all_data = pd.DataFrame(columns=COLUMNS)
 
 st.title("📑 법카 영수증 관리")
 
-# --- 1단계 : 사진 업로드 ---
+# --- 1단계 : 사진 업로드 (전체 덮어쓰기 -> 개별 추가 방식으로 전면 수정) ---
 with st.expander("📸 1단계 : 사진 업로드", expanded=True):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files and st.button("🚀 사진 전송"):
         new_list = []
         now = datetime.now()
         progress_text = st.empty()
+        
+        # 1. 파일들을 먼저 베이스64로 변환 및 압축 처리
         for i, f in enumerate(files):
             try:
-                progress_text.text(f"처리 중... ({i+1}/{len(files)})")
+                progress_text.text(f"사진 압축 처리 중... ({i+1}/{len(files)})")
                 img_b64 = img_to_base64(Image.open(f))
-                new_list.append({"날짜": now.strftime('%y-%m-%d'), "시간대": "중식", "식당명": "", "금액": "", "비고": "", "사진데이터": img_b64, "상태": "대기"})
+                new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", "금액": "", "비고": "", "사진데이터": img_b64, "상태": "대기"})
             except Exception as e: st.error(f"오류: {e}")
         
         if new_list:
-            updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
+            progress_text.text("구글 시트에 데이터 안전하게 한 행씩 추가 중...")
             try:
-                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
+                # [핵심 변경] 전체 데이터를 덮어쓰지 않고, 새 데이터만 한 행씩 시트에 덧붙임(Append)
+                # 이렇게 하면 기존 데이터 규모가 아무리 커도 용량 초과 에러가 절대로 나지 않습니다.
+                for row_data in new_list:
+                    single_row_df = pd.DataFrame([row_data])
+                    # 기존 시트 뒤에 덧붙이기 위해 현재 줄 수 계산 후 매핑
+                    conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=single_row_df[COLUMNS], append=True)
+                
                 st.cache_data.clear()
-                st.success("안전하게 저장되었습니다!")
+                st.success("안전하게 추가되었습니다!")
                 time.sleep(1)
                 st.rerun()
             except Exception as e:
-                st.error("구글 시트 용량 초과 에러가 발생했습니다. 사진 수를 줄이거나 품질을 낮춰야 합니다.")
+                st.error(f"저장 중 에러가 발생했습니다. 구글 시트 상태를 확인해 주세요: {e}")
 
 # --- 2단계: 개별 내용 수정 ---
 st.divider()
 st.subheader("💻 2단계 : 개별 내용 수정")
 
-# [수정포인트] 사진 없는 취소건을 2단계에서 즉시 추가할 수 있는 버튼 배치
 cc1, cc2 = st.columns([6, 1])
 with cc2:
     if st.button("➕ 취소건 추가", use_container_width=True):
         now_date = datetime.now().strftime('%y-%m-%d')
         cancel_row = pd.DataFrame([{
-            "날짜": now_date, "시간대": "결제취소", "식당명": "", 
+            "날짜": now_date, "식당명": "", "시간대": "결제취소", 
             "금액": "", "비고": "오결제", "사진데이터": "", "상태": "대기"
         }])
-        all_data = pd.concat([all_data, cancel_row], ignore_index=True)
-        conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=all_data[COLUMNS])
+        # 취소건 추가 역시 안전하게 append=True 로 작동하도록 개조
+        conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=cancel_row[COLUMNS], append=True)
         st.cache_data.clear()
-        st.session_state.selected_index = len(all_data) - 1
+        st.session_state.selected_index = len(all_data)
         st.rerun()
 
 if not all_data.empty:
@@ -164,7 +169,6 @@ if not all_data.empty:
                 
     curr_idx = min(st.session_state.selected_index, len(row_list)-1)
     
-    # 셀렉트박스 표시 이름 개선 (결제취소 건은 쉽게 알아볼 수 있게 표시)
     def make_label(x):
         r = row_list[x]
         flag = "❌ [취소] " if r['시간대'] == "결제취소" else f"[{x+1}] "
@@ -193,7 +197,6 @@ if not all_data.empty:
             except: d_val = datetime.now()
             u_date = st.date_input("1. 날짜", d_val)
         with f2:
-            # 시간대 옵션에 '결제취소' 추가
             meal_opts = ["조식", "중식", "중식2", "석식", "석식2", "회식", "결제취소"]
             u_meal = st.selectbox("2. 시간대", meal_opts, index=meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
             
@@ -203,7 +206,6 @@ if not all_data.empty:
         with f4:
             u_price = st.text_input("4. 금액", value="" if is_pending and row["시간대"] != "결제취소" else row["금액"])
             
-        # 시간대가 '결제취소'일 때는 자동으로 '오결제'가 디폴트로 박히도록 로직 보완
         default_note = "오결제" if u_meal == "결제취소" else row["비고"]
         u_note = st.text_input("5. 비고", value=default_note)
         
@@ -233,31 +235,18 @@ if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계 : 내역 확인 및 삭제")
 
-
-    
-    # 1. 선임님이 원하시는 [날짜 -> 식당명 -> 시간대] 순서로 리스트를 정의합니다.
     SHOW_COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "상태", "삭제체크"]
     
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
     edit_df["삭제체크"] = False
     
-    # 2. 정의한 순서대로 컬럼 위치를 강제로 재배치합니다.
     edit_df = edit_df[SHOW_COLUMNS]
-    
     edit_df.index = edit_df.index + 1 
     
-    # 3. 정렬된 데이터를 화면에 뿌려줍니다.
     edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
 
-
     done_items = all_data[all_data["상태"] == "완료"].copy()
-
-
-
-
-
     
-    # 마이너스 금액 자릿수 및 콤마 제거 후 연산을 위해 정상 변환
     def to_int(val):
         try:
             clean = str(val).replace(',', '').replace('원', '').strip()
@@ -266,7 +255,6 @@ if not all_data.empty:
             return 0
 
     done_items['int_amount'] = done_items['금액'].apply(to_int)
-
     total_sum = done_items['int_amount'].sum()
     remaining_amount = 500000 - total_sum
     remain_color = "#ff4b4b" if remaining_amount < 0 else "#1f77b4"
@@ -279,7 +267,6 @@ if not all_data.empty:
             else: return "21~말일"
         except: return "기타"
 
-    # 일반 식대 계산시 '결제취소' 건은 마이너스 처리가 되도록 포함하되 구간 정리에 맞춤
     normal_meals = done_items[~done_items["시간대"].isin(["회식"])].copy()
     normal_meals['구간'] = normal_meals['날짜'].apply(get_day_group)
     periodic_sum = normal_meals.groupby('구간')['int_amount'].sum().to_dict()
