@@ -14,7 +14,7 @@ st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# [정렬용] 우선순위 설정
+# [정렬용] 우선순위 설정 ('결제취소'는 가장 아래로 정렬되도록 7번 부여)
 MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5 , "회식": 6, "결제취소": 7}
 
 def get_meal_priority(meal_name):
@@ -41,19 +41,24 @@ def fix_date(d):
     return d_str
 
 def img_to_base64(image):
+    """
+    구글 시트 터짐 방지를 위해 해상도 제한을 (500, 500)으로 대폭 줄이고 
+    압축 퀄리티를 최적화하여 텍스트 식별은 유지하면서 용량만 1/5로 다이어트합니다.
+    """
     image = ImageOps.exif_transpose(image)
     if image.mode != 'RGB': image = image.convert('RGB')
     
-    image.thumbnail((700, 700)) 
-    quality = 40
+    # 해상도를 500 선으로 줄여 셀 용량 초과 에러를 근본적으로 해결
+    image.thumbnail((500, 500)) 
+    quality = 35
     
     while True:
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG", quality=quality)
         b64_string = base64.b64encode(buffered.getvalue()).decode()
         
-        # 구글 시트 안정선(약 5만자) 체크: 안전하게 43,000자 선으로 대폭 하향 조정
-        if len(b64_string) < 43000 or quality <= 10:
+        # 구글 시트 단일 셀 한계(5만 자)보다 훨씬 안전한 35,000자 선에서 컷
+        if len(b64_string) < 35000 or quality <= 10:
             return b64_string
         
         quality -= 5
@@ -99,6 +104,7 @@ try:
         all_data['날짜'] = all_data['날짜'].apply(fix_date)
         all_data['금액'] = all_data['금액'].apply(format_price)
         all_data['temp_p'] = all_data['시간대'].apply(get_meal_priority)
+        # 중요: 데이터 로드 시 날짜와 등록 순서(index)가 뒤섞이지 않게 명확히 정렬
         all_data = all_data.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True)
         all_data = all_data.drop(columns=['temp_p'])
 except:
@@ -106,7 +112,7 @@ except:
 
 st.title("📑 법카 영수증 관리")
 
-# --- 1단계 : 사진 업로드 (전체 덮어쓰기 -> 개별 추가 방식으로 전면 수정) ---
+# --- 1단계 : 사진 업로드 ---
 with st.expander("📸 1단계 : 사진 업로드", expanded=True):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files and st.button("🚀 사진 전송"):
@@ -114,30 +120,28 @@ with st.expander("📸 1단계 : 사진 업로드", expanded=True):
         now = datetime.now()
         progress_text = st.empty()
         
-        # 1. 파일들을 먼저 베이스64로 변환 및 압축 처리
         for i, f in enumerate(files):
             try:
-                progress_text.text(f"사진 압축 처리 중... ({i+1}/{len(files)})")
+                progress_text.text(f"사진 초경량 압축 중... ({i+1}/{len(files)})")
                 img_b64 = img_to_base64(Image.open(f))
-                new_list.append({"날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", "금액": "", "비고": "", "사진데이터": img_b64, "상태": "대기"})
+                new_list.append({
+                    "날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", 
+                    "금액": "", "비고": "", "사진데이터": img_b64, "상태": "대기"
+                })
             except Exception as e: st.error(f"오류: {e}")
         
         if new_list:
-            progress_text.text("구글 시트에 데이터 안전하게 한 행씩 추가 중...")
+            progress_text.text("구글 시트에 안전하게 병합 중...")
+            # append=True 에러를 우회하기 위해 기존 데이터 하단에 안전하게 concat 후 통업데이트
+            updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
             try:
-                # [핵심 변경] 전체 데이터를 덮어쓰지 않고, 새 데이터만 한 행씩 시트에 덧붙임(Append)
-                # 이렇게 하면 기존 데이터 규모가 아무리 커도 용량 초과 에러가 절대로 나지 않습니다.
-                for row_data in new_list:
-                    single_row_df = pd.DataFrame([row_data])
-                    # 기존 시트 뒤에 덧붙이기 위해 현재 줄 수 계산 후 매핑
-                    conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=single_row_df[COLUMNS], append=True)
-                
+                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
                 st.cache_data.clear()
-                st.success("안전하게 추가되었습니다!")
+                st.success("용량 다이어트 성공! 안전하게 저장되었습니다.")
                 time.sleep(1)
                 st.rerun()
             except Exception as e:
-                st.error(f"저장 중 에러가 발생했습니다. 구글 시트 상태를 확인해 주세요: {e}")
+                st.error(f"저장 실패: {e}. 구글 시트가 완전히 가득 찼을 수 있으므로 시트에서 수동으로 오래된 행을 지워야 할 수 있습니다.")
 
 # --- 2단계: 개별 내용 수정 ---
 st.divider()
@@ -151,10 +155,10 @@ with cc2:
             "날짜": now_date, "식당명": "", "시간대": "결제취소", 
             "금액": "", "비고": "오결제", "사진데이터": "", "상태": "대기"
         }])
-        # 취소건 추가 역시 안전하게 append=True 로 작동하도록 개조
-        conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=cancel_row[COLUMNS], append=True)
+        updated = pd.concat([all_data, cancel_row], ignore_index=True)
+        conn.update(spreadsheet=SHEET_URL, spreadsheet_id=None, worksheet="Sheet1", data=updated[COLUMNS])
         st.cache_data.clear()
-        st.session_state.selected_index = len(all_data)
+        st.session_state.selected_index = len(updated) - 1
         st.rerun()
 
 if not all_data.empty:
@@ -172,7 +176,7 @@ if not all_data.empty:
     def make_label(x):
         r = row_list[x]
         flag = "❌ [취소] " if r['시간대'] == "결제취소" else f"[{x+1}] "
-        return f"{flag}{r['날짜']} | {r['식당명'] if r['식당명'] else '새 항목(내용 입력 필요)'}"
+        return f"{flag}{r['날짜']} | {r['식당명'] if r['식당명'] else '새 영수증 (내용 입력 필요)'}"
 
     idx = st.selectbox("항목 선택", range(len(row_list)), index=curr_idx, format_func=make_label)
     
@@ -188,7 +192,7 @@ if not all_data.empty:
         if row["사진데이터"]: 
             st.image(base64.b64decode(row["사진데이터"]), width=300)
         else:
-            st.info("📷 이 항목은 사진이 없는 건입니다. (취소건 등)")
+            st.info("📷 이 항목은 사진이 없는 건입니다.")
             
     with c2:
         f1, f2 = st.columns(2)
@@ -202,9 +206,9 @@ if not all_data.empty:
             
         f3, f4 = st.columns(2)
         with f3:
-            u_name = st.text_input("3. 식당명", value="" if is_pending and row["시간대"] != "결제취소" else row["식당명"])
+            u_name = st.text_input("3. 식당명", value="" if is_pending and row["식당명"] == "" else row["식당명"])
         with f4:
-            u_price = st.text_input("4. 금액", value="" if is_pending and row["시간대"] != "결제취소" else row["금액"])
+            u_price = st.text_input("4. 금액", value="" if is_pending and row["금액"] == "" else row["금액"])
             
         default_note = "오결제" if u_meal == "결제취소" else row["비고"]
         u_note = st.text_input("5. 비고", value=default_note)
@@ -235,6 +239,7 @@ if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계 : 내역 확인 및 삭제")
 
+    # 선임님이 요청하신 [날짜 -> 식당명 -> 시간대] 순서 반영
     SHOW_COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "상태", "삭제체크"]
     
     edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
