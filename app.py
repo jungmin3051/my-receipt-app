@@ -227,16 +227,32 @@ else:
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계 : 내역 확인 및 순서 변경")
-    st.caption("💡 같은 날짜 내에서 순서를 바꾸려면 아래 표에서 행 왼쪽에 있는 체크박스(또는 빈 칸)를 클릭해 선택한 후 이동 버튼을 누르세요.")
+    st.caption("💡 같은 날짜 내에서 순서를 바꾸려면 표의 [삭제체크] 칸에 체크(V)를 한 후, [🔼 위로 이동] 또는 [🔽 아래로 이동] 버튼을 누르세요.")
 
-    # 1. 이동 버튼을 표 위로 배치하여 더 잘 보이게 수정
+    # 1. 표 미리 정의 (사용자가 체크박스 체크한 데이터를 받기 위함)
+    SHOW_COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "상태", "삭제체크"]
+    edit_df = all_data.copy()
+    edit_df["삭제체크"] = False
+    edit_df = edit_df[SHOW_COLUMNS]
+    edit_df.index = edit_df.index + 1 
+    
+    # 표 렌더링 및 편집 데이터 받아오기
+    edited_data = st.data_editor(
+        edit_df, 
+        use_container_width=True, 
+        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"]
+    )
+
+    # 2. [삭제체크]에 체크된 행의 인덱스 번호 찾기
+    checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
+    
+    # 이동 버튼 배치
     b1, b2, b_msg = st.columns([1, 1, 5])
     
-    # 세션 상태에서 선택된 행 감지
-    selected_rows = st.session_state.get("data_editor_key", {}).get("selection", {}).get("rows", [])
-    
-    if selected_rows:
-        target_idx = selected_rows[0] # 선택한 행의 인덱스
+    # 딱 1개 항목만 체크했을 때 순서 이동 기능 작동
+    if len(checked_indices) == 1:
+        # 표 index는 1부터 시작하므로 실제 데이터(all_data) 인덱스는 -1 해줍니다.
+        target_idx = checked_indices[0] - 1 
         
         with b1:
             if st.button("🔼 위로 이동", use_container_width=True) and target_idx > 0:
@@ -244,6 +260,8 @@ if not all_data.empty:
                     all_data.iloc[target_idx], all_data.iloc[target_idx - 1] = all_data.iloc[target_idx - 1].copy(), all_data.iloc[target_idx].copy()
                     conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=all_data[COLUMNS])
                     st.cache_data.clear()
+                    st.success("위로 이동 완료!")
+                    time.sleep(0.5)
                     st.rerun()
                 else:
                     st.warning("동일한 날짜 내에서만 순서를 변경할 수 있습니다.")
@@ -254,33 +272,23 @@ if not all_data.empty:
                     all_data.iloc[target_idx], all_data.iloc[target_idx + 1] = all_data.iloc[target_idx + 1].copy(), all_data.iloc[target_idx].copy()
                     conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=all_data[COLUMNS])
                     st.cache_data.clear()
+                    st.success("아래로 이동 완료!")
+                    time.sleep(0.5)
                     st.rerun()
                 else:
                     st.warning("동일한 날짜 내에서만 순서를 변경할 수 있습니다.")
+                    
+    elif len(checked_indices) > 1:
+        with b1: st.button("🔼 위로 이동", disabled=True, use_container_width=True)
+        with b2: st.button("🔽 아래로 이동", disabled=True, use_container_width=True)
+        with b_msg: st.warning("⚠️ 순서를 바꿀 때는 하나의 항목만 체크해 주세요! (여러 개 체크 시 이동 불가)")
     else:
-        # 행을 아직 선택하지 않았을 때 버튼 모양만 보여주고 안내 메시지 띄우기
-        with b1:
-            st.button("🔼 위로 이동", disabled=True, use_container_width=True)
-        with b2:
-            st.button("🔽 아래로 이동", disabled=True, use_container_width=True)
-        with b_msg:
-            st.info("👈 순서를 바꾸려면 아래 표에서 행을 먼저 클릭(선택)해 주세요!")
+        # 아무것도 체크하지 않았을 때 버튼 비활성화 및 안내
+        with b1: st.button("🔼 위로 이동", disabled=True, use_container_width=True)
+        with b2: st.button("🔽 아래로 이동", disabled=True, use_container_width=True)
+        with b_msg: st.info("👈 순서를 바꾸거나 삭제하려면 원하는 항목의 [삭제체크] 칸을 선택해 주세요!")
 
-    # 2. 표 렌더링
-    SHOW_COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "상태", "삭제체크"]
-    edit_df = all_data.copy()
-    edit_df["삭제체크"] = False
-    edit_df = edit_df[SHOW_COLUMNS]
-    edit_df.index = edit_df.index + 1 
-    
-    edited_data = st.data_editor(
-        edit_df, 
-        use_container_width=True, 
-        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"],
-        key="data_editor_key" # 선택 감지용 키
-    )
-
-    # 통계 및 계산 로직 (이하 기존과 동일)
+    # 통계 및 계산 로직 (기존과 동일)
     done_items = all_data[all_data["상태"] == "완료"].copy()
     
     def to_int(val):
@@ -333,7 +341,7 @@ if not all_data.empty:
     table_html += "</tbody></table>"
     st.markdown(table_html, unsafe_allow_html=True)
 
-    checked_indices = edited_data[edited_data["삭제체크"] == True].index.tolist()
+    # 삭제용 버튼 로직 (체크가 여러 개 되어 있어도 한 번에 삭제 가능)
     if checked_indices:
         if st.button(f"🗑️ {len(checked_indices)}개 항목 삭제하기", type="primary", use_container_width=True):
             remaining_df = all_data.drop(all_data.index[[i-1 for i in checked_indices]]).reset_index(drop=True)
