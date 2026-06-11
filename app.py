@@ -227,37 +227,20 @@ else:
 if not all_data.empty:
     st.divider()
     st.subheader("👀 3단계 : 내역 확인 및 순서 변경")
-    st.caption("💡 같은 날짜 내에서 순서를 바꾸려면 표에서 행을 클릭해 선택한 후, 아래 [🔼 위로 이동] [🔽 아래로 이동] 버튼을 누르세요.")
+    st.caption("💡 같은 날짜 내에서 순서를 바꾸려면 아래 표에서 행 왼쪽에 있는 체크박스(또는 빈 칸)를 클릭해 선택한 후 이동 버튼을 누르세요.")
 
-    SHOW_COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "상태", "삭제체크"]
+    # 1. 이동 버튼을 표 위로 배치하여 더 잘 보이게 수정
+    b1, b2, b_msg = st.columns([1, 1, 5])
     
-    edit_df = all_data.copy()
-    edit_df["삭제체크"] = False
-    edit_df = edit_df[SHOW_COLUMNS]
-    edit_df.index = edit_df.index + 1 
-    
-    # 📌 row_selection=True 옵션을 활성화하여 사용자가 행을 선택할 수 있게 고쳤습니다.
-    edited_data = st.data_editor(
-        edit_df, 
-        use_container_width=True, 
-        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"],
-        key="data_editor_key"
-    )
-
-    # 행 선택 여부 감지 로직
+    # 세션 상태에서 선택된 행 감지
     selected_rows = st.session_state.get("data_editor_key", {}).get("selection", {}).get("rows", [])
     
-    # 순서 변경 버튼 배치
-    b1, b2, _ = st.columns([1, 1, 5])
-    
     if selected_rows:
-        target_idx = selected_rows[0] # 사용자가 표에서 클릭한 행의 기본 인덱스
+        target_idx = selected_rows[0] # 선택한 행의 인덱스
         
         with b1:
             if st.button("🔼 위로 이동", use_container_width=True) and target_idx > 0:
-                # 같은 날짜인 경우에만 순서 교환 허용
                 if all_data.loc[target_idx, "날짜"] == all_data.loc[target_idx - 1, "날짜"]:
-                    # 행 바꿈 스와이프 로직
                     all_data.iloc[target_idx], all_data.iloc[target_idx - 1] = all_data.iloc[target_idx - 1].copy(), all_data.iloc[target_idx].copy()
                     conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=all_data[COLUMNS])
                     st.cache_data.clear()
@@ -274,8 +257,30 @@ if not all_data.empty:
                     st.rerun()
                 else:
                     st.warning("동일한 날짜 내에서만 순서를 변경할 수 있습니다.")
+    else:
+        # 행을 아직 선택하지 않았을 때 버튼 모양만 보여주고 안내 메시지 띄우기
+        with b1:
+            st.button("🔼 위로 이동", disabled=True, use_container_width=True)
+        with b2:
+            st.button("🔽 아래로 이동", disabled=True, use_container_width=True)
+        with b_msg:
+            st.info("👈 순서를 바꾸려면 아래 표에서 행을 먼저 클릭(선택)해 주세요!")
 
-    # 통계 및 계산 로직
+    # 2. 표 렌더링
+    SHOW_COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "상태", "삭제체크"]
+    edit_df = all_data.copy()
+    edit_df["삭제체크"] = False
+    edit_df = edit_df[SHOW_COLUMNS]
+    edit_df.index = edit_df.index + 1 
+    
+    edited_data = st.data_editor(
+        edit_df, 
+        use_container_width=True, 
+        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"],
+        key="data_editor_key" # 선택 감지용 키
+    )
+
+    # 통계 및 계산 로직 (이하 기존과 동일)
     done_items = all_data[all_data["상태"] == "완료"].copy()
     
     def to_int(val):
