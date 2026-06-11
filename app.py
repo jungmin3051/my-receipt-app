@@ -63,25 +63,30 @@ def create_photo_pdf(df):
     else:
         pdf.set_font("Arial", size=9)
 
-    # 시트에 저장된 정렬 순서(행 인덱스 순) 그대로 PDF 생성에 반영
-    df_sorted = df.reset_index(drop=True)
+    # 📌 핵심 수정: 결제취소가 아니고 + '사진데이터'가 실제로 존재하는 행만 쏙 골라냅니다.
+    valid_photos_df = df[(df["시간대"] != "결제취소") & (df["사진데이터"] != "") & (df["사진데이터"].notna())].reset_index(drop=True)
 
-    for i, (_, row) in enumerate(df_sorted.iterrows()):
-        if row["시간대"] == "결제취소" or not row["사진데이터"]:
-            continue
+    # 📌 사진이 있는 건들만 정렬된 순서대로 땡겨서 4개씩 배치합니다.
+    for i, row in valid_photos_df.iterrows():
+        if i % 4 == 0: 
+            pdf.add_page()
             
-        if i % 4 == 0: pdf.add_page()
         try:
             img_data = base64.b64decode(row["사진데이터"])
             temp_img = io.BytesIO(img_data)
+            
+            # i가 사진 있는 건들로만 0, 1, 2, 3... 순서대로 가기 때문에 빈칸 없이 채워집니다.
             x, y = (10 if i % 2 == 0 else 105), (10 if i % 4 < 2 else 145)
             pdf.image(temp_img, x=x, y=y, w=90, h=120)
+            
             pdf.set_xy(x, y + 122)
             p_val = f"{row['금액']}원" if "원" not in str(row['금액']) else row['금액']
             display_meal = clean_meal_name(row['시간대'])
             info_text = f"{row['날짜']} / {row['식당명']} / {display_meal} / {p_val}"
             pdf.cell(90, 10, info_text, ln=0, align='C')
-        except: continue
+        except: 
+            continue
+            
     return bytes(pdf.output())
 
 # 1. 데이터 로드
