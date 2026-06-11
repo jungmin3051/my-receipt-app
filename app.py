@@ -14,11 +14,12 @@ st.set_page_config(page_title="법카 영수증 관리", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-4AxmAjwmE8ouFmjk/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# [정렬용] 우선순위 설정 ('결제취소'는 가장 아래로 정렬되도록 7번 부여)
-MEAL_ORDER = {"조식": 1, "중식": 2, "중식2": 3, "석식": 4, "석식2": 5 , "회식": 6, "결제취소": 7}
+# 깔끔하게 정리된 시간대 정의
+MEAL_OPTIONS = ["조식", "중식", "석식", "회식", "결제취소"]
+MEAL_ORDER = {"조식": 1, "중식": 2, "석식": 3, "회식": 4, "결제취소": 5}
 
 def get_meal_priority(meal_name):
-    return MEAL_ORDER.get(meal_name, 7)
+    return MEAL_ORDER.get(meal_name, 5)
 
 def clean_meal_name(meal_name):
     if "중식" in meal_name: return "중식"
@@ -41,26 +42,16 @@ def fix_date(d):
     return d_str
 
 def img_to_base64(image):
-    """
-    구글 시트 터짐 방지를 위해 해상도 제한을 (500, 500)으로 대폭 줄이고 
-    압축 퀄리티를 최적화하여 텍스트 식별은 유지하면서 용량만 1/5로 다이어트합니다.
-    """
     image = ImageOps.exif_transpose(image)
     if image.mode != 'RGB': image = image.convert('RGB')
-    
-    # 해상도를 500 선으로 줄여 셀 용량 초과 에러를 근본적으로 해결
     image.thumbnail((500, 500)) 
     quality = 35
-    
     while True:
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG", quality=quality)
         b64_string = base64.b64encode(buffered.getvalue()).decode()
-        
-        # 구글 시트 단일 셀 한계(5만 자)보다 훨씬 안전한 35,000자 선에서 컷
         if len(b64_string) < 35000 or quality <= 10:
             return b64_string
-        
         quality -= 5
 
 def create_photo_pdf(df):
@@ -72,8 +63,8 @@ def create_photo_pdf(df):
     else:
         pdf.set_font("Arial", size=9)
 
-    df['temp_p'] = df['시간대'].apply(get_meal_priority)
-    df_sorted = df.sort_values(by=["날짜", "temp_p"]).reset_index(drop=True)
+    # 시트에 저장된 정렬 순서(행 인덱스 순) 그대로 PDF 생성에 반영
+    df_sorted = df.reset_index(drop=True)
 
     for i, (_, row) in enumerate(df_sorted.iterrows()):
         if row["시간대"] == "결제취소" or not row["사진데이터"]:
@@ -103,10 +94,7 @@ try:
     if not all_data.empty:
         all_data['날짜'] = all_data['날짜'].apply(fix_date)
         all_data['금액'] = all_data['금액'].apply(format_price)
-        all_data['temp_p'] = all_data['시간대'].apply(get_meal_priority)
-        # 중요: 데이터 로드 시 날짜와 등록 순서(index)가 뒤섞이지 않게 명확히 정렬
-        all_data = all_data.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True)
-        all_data = all_data.drop(columns=['temp_p'])
+        # 최초 로드 시 정렬이 깨지지 않도록 유지 (순서 조정한 내역이 시트 순서 그대로 유지됨)
 except:
     all_data = pd.DataFrame(columns=COLUMNS)
 
@@ -132,8 +120,10 @@ with st.expander("📸 1단계 : 사진 업로드", expanded=True):
         
         if new_list:
             progress_text.text("구글 시트에 안전하게 병합 중...")
-            # append=True 에러를 우회하기 위해 기존 데이터 하단에 안전하게 concat 후 통업데이트
             updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
+            # 신규 업로드 시 같은 날짜 그리 모이도록 기본 정렬 후 저장
+            updated['temp_p'] = updated['시간대'].apply(get_meal_priority)
+            updated = updated.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True).drop(columns=['temp_p'])
             try:
                 conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
                 st.cache_data.clear()
@@ -141,7 +131,7 @@ with st.expander("📸 1단계 : 사진 업로드", expanded=True):
                 time.sleep(1)
                 st.rerun()
             except Exception as e:
-                st.error(f"저장 실패: {e}. 구글 시트가 완전히 가득 찼을 수 있으므로 시트에서 수동으로 오래된 행을 지워야 할 수 있습니다.")
+                st.error(f"저장 실패: {e}")
 
 # --- 2단계: 개별 내용 수정 ---
 st.divider()
@@ -156,7 +146,7 @@ with cc2:
             "금액": "", "비고": "오결제", "사진데이터": "", "상태": "대기"
         }])
         updated = pd.concat([all_data, cancel_row], ignore_index=True)
-        conn.update(spreadsheet=SHEET_URL, spreadsheet_id=None, worksheet="Sheet1", data=updated[COLUMNS])
+        conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated[COLUMNS])
         st.cache_data.clear()
         st.session_state.selected_index = len(updated) - 1
         st.rerun()
@@ -201,8 +191,7 @@ if not all_data.empty:
             except: d_val = datetime.now()
             u_date = st.date_input("1. 날짜", d_val)
         with f2:
-            meal_opts = ["조식", "중식", "중식2", "석식", "석식2", "회식", "결제취소"]
-            u_meal = st.selectbox("2. 시간대", meal_opts, index=meal_opts.index(row["시간대"]) if row["시간대"] in meal_opts else 1)
+            u_meal = st.selectbox("2. 시간대", MEAL_OPTIONS, index=MEAL_OPTIONS.index(row["시간대"]) if row["시간대"] in MEAL_OPTIONS else 1)
             
         f3, f4 = st.columns(2)
         with f3:
@@ -234,30 +223,64 @@ if not all_data.empty:
 else:
     st.info("등록된 영수증이 없습니다.")
 
-# --- 3단계: 내역 확인 및 삭제 ---
+# --- 3단계: 내역 확인 및 순서 변경 ---
 if not all_data.empty:
     st.divider()
-    st.subheader("👀 3단계 : 내역 확인 및 삭제")
+    st.subheader("👀 3단계 : 내역 확인 및 순서 변경")
+    st.caption("💡 같은 날짜 내에서 순서를 바꾸려면 표에서 행을 클릭해 선택한 후, 아래 [🔼 위로 이동] [🔽 아래로 이동] 버튼을 누르세요.")
 
-    # 선임님이 요청하신 [날짜 -> 식당명 -> 시간대] 순서 반영
     SHOW_COLUMNS = ["날짜", "식당명", "시간대", "금액", "비고", "상태", "삭제체크"]
     
-    edit_df = all_data.drop(columns=["사진데이터"], errors='ignore').copy()
+    edit_df = all_data.copy()
     edit_df["삭제체크"] = False
-    
     edit_df = edit_df[SHOW_COLUMNS]
     edit_df.index = edit_df.index + 1 
     
-    edited_data = st.data_editor(edit_df, use_container_width=True, disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"])
+    # 📌 row_selection=True 옵션을 활성화하여 사용자가 행을 선택할 수 있게 고쳤습니다.
+    edited_data = st.data_editor(
+        edit_df, 
+        use_container_width=True, 
+        disabled=["날짜", "식당명", "시간대", "금액", "비고", "상태"],
+        key="data_editor_key"
+    )
 
+    # 행 선택 여부 감지 로직
+    selected_rows = st.session_state.get("data_editor_key", {}).get("selection", {}).get("rows", [])
+    
+    # 순서 변경 버튼 배치
+    b1, b2, _ = st.columns([1, 1, 5])
+    
+    if selected_rows:
+        target_idx = selected_rows[0] # 사용자가 표에서 클릭한 행의 기본 인덱스
+        
+        with b1:
+            if st.button("🔼 위로 이동", use_container_width=True) and target_idx > 0:
+                # 같은 날짜인 경우에만 순서 교환 허용
+                if all_data.loc[target_idx, "날짜"] == all_data.loc[target_idx - 1, "날짜"]:
+                    # 행 바꿈 스와이프 로직
+                    all_data.iloc[target_idx], all_data.iloc[target_idx - 1] = all_data.iloc[target_idx - 1].copy(), all_data.iloc[target_idx].copy()
+                    conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=all_data[COLUMNS])
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.warning("동일한 날짜 내에서만 순서를 변경할 수 있습니다.")
+                    
+        with b2:
+            if st.button("🔽 아래로 이동", use_container_width=True) and target_idx < len(all_data) - 1:
+                if all_data.loc[target_idx, "날짜"] == all_data.loc[target_idx + 1, "날짜"]:
+                    all_data.iloc[target_idx], all_data.iloc[target_idx + 1] = all_data.iloc[target_idx + 1].copy(), all_data.iloc[target_idx].copy()
+                    conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=all_data[COLUMNS])
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.warning("동일한 날짜 내에서만 순서를 변경할 수 있습니다.")
+
+    # 통계 및 계산 로직
     done_items = all_data[all_data["상태"] == "완료"].copy()
     
     def to_int(val):
-        try:
-            clean = str(val).replace(',', '').replace('원', '').strip()
-            return int(clean)
-        except:
-            return 0
+        try: return int(str(val).replace(',', '').replace('원', '').strip())
+        except: return 0
 
     done_items['int_amount'] = done_items['금액'].apply(to_int)
     total_sum = done_items['int_amount'].sum()
@@ -322,7 +345,7 @@ if not done_df.empty:
     with d1:
         ex_out = io.BytesIO()
         excel_df = done_df.drop(columns=["사진데이터", "상태"], errors='ignore').copy()
-        excel_df["시간대"] = excel_df["시간대"].apply(lambda x: "결제취소" if x == "결제취소" else clean_meal_name(x))
+        excel_df["시간대"] = excel_df["시간대"].apply(clean_meal_name)
         excel_df.to_excel(ex_out, index=False)
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
     with d2:
