@@ -90,9 +90,9 @@ def img_to_base64(image):
 
     if image.mode != 'RGB': image = image.convert('RGB')
 
-    image.thumbnail((500, 500)) 
+    image.thumbnail((600, 600)) 
 
-    quality = 35
+    quality = 85
 
     while True:
 
@@ -102,7 +102,7 @@ def img_to_base64(image):
 
         b64_string = base64.b64encode(buffered.getvalue()).decode()
 
-        if len(b64_string) < 35000 or quality <= 10:
+        if len(b64_string) < 45000 or quality <= 75:
 
             return b64_string
 
