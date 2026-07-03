@@ -4,7 +4,6 @@ import pandas as pd
 from datetime import datetime
 import io
 import requests
-from PIL import Image, ImageOps
 from fpdf import FPDF
 import time
 import os
@@ -16,6 +15,64 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1x419Jb6laxcObm4z2nFU_W65Cx-
 DRIVE_FOLDER_ID = "1BlX3KIH7Ygu8zAbDLRJBbxDzMa7AE92f" 
 
 conn = st.connection("gsheets", type=GSheetsConnection)
+
+# 구글 서비스 계정 자격증명 정보 안전하게 파싱하는 함수
+def get_google_credentials():
+    try:
+        # Streamlit Secrets에서 connections.gsheets 섹션을 가져옵니다.
+        secret_data = st.secrets["connections"]["gsheets"]
+        
+        # 서비스 계정 JSON 포맷에 맞게 딕셔너리 재구성
+        creds_dict = {
+            "type": secret_data.get("type", "service_account"),
+            "project_id": secret_data.get("project_id"),
+            "private_key_id": secret_data.get("private_key_id"),
+            "private_key": secret_data.get("private_key").replace("\\n", "\n") if secret_data.get("private_key") else None,
+            "client_email": secret_data.get("client_email"),
+            "client_id": secret_data.get("client_id"),
+            "auth_uri": secret_data.get("auth_uri", "https://accounts.google.com/o/oauth2/auth"),
+            "token_uri": secret_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+            "auth_provider_x509_cert_url": secret_data.get("auth_provider_x509_cert_url", "https://www.googleapis.com/oauth2/v1/certs"),
+            "client_x509_cert_url": secret_data.get("client_x509_cert_url")
+        }
+        return creds_dict
+    except Exception as e:
+        st.error(f"Secrets 파일에서 인증 정보를 읽어오는데 실패했습니다: {e}")
+        return None
+
+# OAuth2 Access Token 동적 발급 함수
+def get_access_token():
+    creds = get_google_credentials()
+    if not creds or not creds["client_email"] or not creds["private_key"]:
+        return None
+    
+    try:
+        import jwt
+        now = int(time.time())
+        # 구글 드라이브와 시트 권한 스코프 선언
+        payload = {
+            "iss": creds["client_email"],
+            "scope": "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file",
+            "aud": creds["token_uri"],
+            "exp": now + 3600,
+            "iat": now
+        }
+        # JWT 생성
+        signed_jwt = jwt.encode(payload, creds["private_key"], algorithm="RS256")
+        
+        # 토큰 요청
+        r = requests.post(creds["token_uri"], data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": signed_jwt
+        })
+        if r.status_code == 200:
+            return r.json().get("access_token")
+    except ImportError:
+        # PyJWT 라이브러리가 없는 경우 간이 안내
+        st.error("🔒 'PyJWT'와 'cryptography' 라이브러리가 필요합니다. 'pip install PyJWT cryptography'를 실행하거나 requirements.txt에 추가해 주세요.")
+    except Exception as e:
+        st.error(f"토큰 발급 중 오류 발생: {e}")
+    return None
 
 MEAL_OPTIONS = ["조식", "중식", "석식", "회식", "결제취소"]
 MEAL_ORDER = {"조식": 1, "중식": 2, "석식": 3, "회식": 4, "결제취소": 5}
@@ -45,14 +102,8 @@ def fix_date(d):
     return d_str
 
 # 구글 드라이브 파일 업로드 함수
-def upload_to_drive(file_bytes, filename):
+def upload_to_drive(file_bytes, filename, token):
     try:
-        creds = conn._connect()._creds
-        if creds.expired:
-            from google.auth.transport.requests import Request
-            creds.refresh(Request())
-        token = creds.token
-        
         headers = {"Authorization": f"Bearer {token}"}
         metadata = {
             "name": filename,
@@ -75,16 +126,11 @@ def upload_to_drive(file_bytes, filename):
     return ""
 
 # 구글 드라이브 파일 다운로드 함수 (PDF 빌드용)
-def download_image_bytes(url):
+def download_image_bytes(url, token):
     try:
         if not url or "drive.google.com" not in url:
             return None
-        creds = conn._connect()._creds
-        if creds.expired:
-            from google.auth.transport.requests import Request
-            creds.refresh(Request())
-        headers = {"Authorization": f"Bearer {creds.token}"}
-        
+        headers = {"Authorization": f"Bearer {token}"}
         file_id = url.split("id=")[-1]
         download_url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
         res = requests.get(download_url, headers=headers)
@@ -94,7 +140,7 @@ def download_image_bytes(url):
         pass
     return None
 
-def create_photo_pdf(df):
+def create_photo_pdf(df, token):
     pdf = FPDF()
     font_path = "NanumGothic.ttf"
     if os.path.exists(font_path):
@@ -107,7 +153,7 @@ def create_photo_pdf(df):
 
     for i, row in valid_photos_df.iterrows():
         if i % 4 == 0: pdf.add_page()
-        img_bytes = download_image_bytes(row["사진데이터"])
+        img_bytes = download_image_bytes(row["사진데이터"], token)
         if img_bytes:
             try:
                 temp_img = io.BytesIO(img_bytes)
@@ -138,44 +184,49 @@ except:
 
 st.title("📑 법카 영수증 관리 (드라이브 고화질 정렬형)")
 
+# 토큰 미리 받아오기
+token = get_access_token()
+
 # --- 1단계 : 사진 업로드 ---
 with st.expander("📸 1단계 : 사진 업로드", expanded=True):
     files = st.file_uploader("사진 선택", accept_multiple_files=True)
     if files and st.button("🚀 사진 전송"):
-        new_list = []
-        now = datetime.now()
-        progress_text = st.empty()
-        
-        for i, f in enumerate(files):
-            try:
-                progress_text.text(f"구글 드라이브에 원본 전송 중... ({i+1}/{len(files)})")
-                file_bytes = f.read()
-                filename = f"receipt_{now.strftime('%y%m%d')}_{i}_{f.name}"
-                
-                drive_url = upload_to_drive(file_bytes, filename)
-                
-                if drive_url:
-                    new_list.append({
-                        "날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", 
-                        "금액": "", "비고": "", "사진데이터": drive_url, "상태": "대기"
-                    })
-                else:
-                    st.error(f"{f.name} 업로드에 실패했습니다. 드라이브 폴더 권한을 확인하세요.")
-            except Exception as e: 
-                st.error(f"오류: {e}")
-        
-        if new_list:
-            progress_text.text("구글 시트에 내역 매칭 중...")
-            updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
-            updated['temp_p'] = updated['시간대'].apply(get_meal_priority)
-            updated = updated.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True).drop(columns=['temp_p'])
+        if not token:
+            st.error("🔑 구글 인증 토큰을 가져오지 못했습니다. `PyJWT` 설치 상태 및 Secrets 설정을 확인해 주세요.")
+        else:
+            new_list = []
+            now = datetime.now()
+            progress_text = st.empty()
             
-            # 🔥 에러가 났던 원인인 라이브러리 버전별 인자 충돌 우회를 위해 가장 베이직한 형태로 업데이트 선언
-            conn.update(spreadsheet=SHEET_URL, data=updated[COLUMNS])
-            st.cache_data.clear()
-            st.success("고화질 연동 완료! 시트가 가벼워졌습니다.")
-            time.sleep(1)
-            st.rerun()
+            for i, f in enumerate(files):
+                try:
+                    progress_text.text(f"구글 드라이브에 원본 전송 중... ({i+1}/{len(files)})")
+                    file_bytes = f.read()
+                    filename = f"receipt_{now.strftime('%y%m%d')}_{i}_{f.name}"
+                    
+                    drive_url = upload_to_drive(file_bytes, filename, token)
+                    
+                    if drive_url:
+                        new_list.append({
+                            "날짜": now.strftime('%y-%m-%d'), "식당명": "", "시간대": "중식", 
+                            "금액": "", "비고": "", "사진데이터": drive_url, "상태": "대기"
+                        })
+                    else:
+                        st.error(f"{f.name} 업로드에 실패했습니다. 드라이브 폴더 공유 권한(편집자)을 재확인하세요.")
+                except Exception as e: 
+                    st.error(f"오류: {e}")
+            
+            if new_list:
+                progress_text.text("구글 시트에 내역 매칭 중...")
+                updated = pd.concat([all_data, pd.DataFrame(new_list)], ignore_index=True)
+                updated['temp_p'] = updated['시간대'].apply(get_meal_priority)
+                updated = updated.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True).drop(columns=['temp_p'])
+                
+                conn.update(spreadsheet=SHEET_URL, data=updated[COLUMNS])
+                st.cache_data.clear()
+                st.success("고화질 연동 완료! 시트가 가벼워졌습니다.")
+                time.sleep(1)
+                st.rerun()
 
 # --- 2단계: 개별 내용 수정 ---
 st.divider()
@@ -221,8 +272,8 @@ if not all_data.empty:
     c1, c2 = st.columns([1, 2])
     
     with c1: 
-        if row["사진데이터"] and "drive.google" in row["사진데이터"]: 
-            img_b = download_image_bytes(row["사진데이터"])
+        if row["사진데이터"] and "drive.google" in row["사진데이터"] and token: 
+            img_b = download_image_bytes(row["사진데이터"], token)
             if img_b:
                 st.image(img_b, width=350, caption="구글 드라이브 원본 고화질 프리뷰")
             else:
@@ -324,7 +375,7 @@ if not all_data.empty:
 # --- 4단계: 다운로드 ---
 st.divider()
 done_df = all_data[all_data["상태"] == "완료"]
-if not done_df.empty:
+if not done_df.empty and token:
     st.subheader("📥 4단계 : 다운로드")
     d1, d2 = st.columns(2)
     with d1:
@@ -334,4 +385,4 @@ if not done_df.empty:
         st.download_button("📊 엑셀 다운로드", ex_out.getvalue(), "Receipt_List.xlsx", use_container_width=True)
     with d2:
         pdf_fn = f"{datetime.now().month}월 영수증_한정민.pdf"
-        st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df), pdf_fn, "application/pdf", use_container_width=True)
+        st.download_button("📄 영수증 PDF 다운로드", create_photo_pdf(done_df, token), pdf_fn, "application/pdf", use_container_width=True)
