@@ -11,5 +11,3 @@ google-auth-oauthlib
 openpyxl
 fpdf2  
 xlsxwriter
-PyJWT
-cryptography
