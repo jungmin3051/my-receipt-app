@@ -45,7 +45,7 @@ def img_to_base64(image):
     image = ImageOps.exif_transpose(image)
     if image.mode != 'RGB': image = image.convert('RGB')
     image.thumbnail((500, 500)) 
-    quality = 60
+    quality = 80
     while True:
         buffered = io.BytesIO()
         image.save(buffered, format="JPEG", quality=quality)
