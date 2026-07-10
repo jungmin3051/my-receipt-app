@@ -209,6 +209,7 @@ if not all_data.empty:
         
         if st.button("💾 이 항목 저장", use_container_width=True):
             with st.spinner("저장 중..."):
+                # 1. 현재 화면에서 수정한 내용 반영
                 row_list[idx].update({
                     "날짜": u_date.strftime('%y-%m-%d'), 
                     "식당명": u_name, 
@@ -217,7 +218,26 @@ if not all_data.empty:
                     "비고": u_note, 
                     "상태": "완료"
                 })
-                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=pd.DataFrame(row_list)[COLUMNS])
+                
+                # 2. [핵심 추가] 저장하기 직전에 전체 데이터를 날짜 및 식당 우선순위 순서로 쫙 재정렬
+                updated_df = pd.DataFrame(row_list)
+                updated_df['temp_p'] = updated_df['시간대'].apply(get_meal_priority)
+                updated_df = updated_df.sort_values(by=["날짜", "temp_p"], ascending=[True, True]).reset_index(drop=True)
+                
+                # 3. 정렬이 완료된 깨끗한 데이터를 구글 시트에 업데이트
+                conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=updated_df[COLUMNS])
+                st.cache_data.clear()
+                
+                # 4. 저장 후 자동으로 다음 대기 중인 영수증을 가리키도록 인덱스 재조정
+                refreshed_rows = updated_df.to_dict('records')
+                st.session_state.selected_index = 0
+                for i, r in enumerate(refreshed_rows):
+                    if r["상태"] == "대기":
+                        st.session_state.selected_index = i
+                        break
+                        
+                time.sleep(0.5)
+                st.rerun()
                 st.cache_data.clear()
                 for i in range(len(row_list)):
                     if row_list[i]["상태"] == "대기":
